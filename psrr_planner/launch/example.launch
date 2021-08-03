@@ -1,0 +1,23 @@
+<launch>
+
+    <arg name="nodelet_manager" default="psrr_nodelet_manager"/>
+    <arg name="map_file" default="$(find panthera_utilis)/maps/hallway_projected_ogm.yaml"/>
+
+    <!-- rviz configuration path -->
+    <arg name="rvizconfig" default="$(find psrr_planner)/config/rviz_display.rviz" />
+
+    <node pkg="tf" type="static_transform_publisher" name="map2base_publisher" args="0 0 0 0 0 0 map base_link 100" />
+
+    <!-- Run the map server --> 
+    <node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)" />
+
+    <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager)" args="manager" output="screen">
+        <rosparam file="$(find psrr_planner)/launch/global_costmap_params.yaml" command="load" ns="global_costmap"/>
+    </node>
+
+    <node pkg="nodelet" type="nodelet" name="psrr_planner_nodelet" args="load psrr_planner/PsrrPlannerNodelet $(arg nodelet_manager)"/> 
+
+    <!-- rivz -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)" required="true"/>
+
+</launch> 

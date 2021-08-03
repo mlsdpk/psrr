@@ -9,6 +9,9 @@ endif()
 set(${PROJECT_NAME}_CATKIN_DEPS
   roscpp
   psrr_msgs
+  tf2
+  tf2_ros
+  costmap_2d
 )
 
 find_package(catkin REQUIRED COMPONENTS ${${PROJECT_NAME}_CATKIN_DEPS})
