@@ -1,0 +1,3 @@
+<library path="lib/libpsrr_planner_nodelet">
+  <class name="psrr_planner/PsrrPlannerNodelet" type="psrr_planner::PsrrPlannerNodelet" base_class_type="nodelet::Nodelet" />
+</library>

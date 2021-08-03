@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>psrr_planner</name>
+  <version>1.0.0</version>
+  <description>The psrr_planner package</description>
+
+  <maintainer email="mlsdphonethk@gmail.com">Phone Thiha Kyaw</maintainer>
+
+  <license>TODO</license>
+
+  <author email="mlsdphonethk@gmail.com">Phone Thiha Kyaw</author>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  
+  <depend>roscpp</depend>
+  <depend>nodelet</depend>
+  <depend>psrr_msgs</depend>
+
+  <export>
+    <nodelet plugin="${prefix}/nodelet_plugins.xml" />
+  </export>
+</package>
