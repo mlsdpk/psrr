@@ -8,4 +8,4 @@ plugins:
   - {name: static_layer, type: "costmap_2d::StaticLayer"}
   - {name: inflation_layer, type: "costmap_2d::InflationLayer"}
 inflation_layer:
-  inflation_radius: 0.1
+  inflation_radius: 0.05

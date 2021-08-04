@@ -1,5 +1,7 @@
 #pragma once
 
+#include <std_msgs/ColorRGBA.h>
+
 #include <iostream>
 #include <memory>
 #include <vector>

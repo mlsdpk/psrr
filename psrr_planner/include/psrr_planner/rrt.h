@@ -20,7 +20,7 @@ class RRT {
 
   ~RRT();
 
-  void init();
+  void init(std::shared_ptr<Vertex> start, std::shared_ptr<Vertex> goal);
 
   /**
    * @brief Randomly sample a n-dimensional state limited by min and max of each
@@ -34,11 +34,17 @@ class RRT {
   double distance(const Vertex& v1, const Vertex& v2);
   void interpolate(const Vertex& from_v, const Vertex& to_v, const double t,
                    std::shared_ptr<Vertex>& v);
-  bool isCollision(const Vertex& from_v, const Vertex& to_v);
+  bool isCollision(const Vertex& from_v, const Vertex& to_v,
+                   const std::vector<geometry_msgs::Point>& footprint);
 
   void update(const std::vector<geometry_msgs::Point>& footprint);
 
   const std::vector<std::shared_ptr<Vertex>>* getVertices() const;
+  const std::vector<
+      std::pair<std::shared_ptr<Vertex>, std::shared_ptr<Vertex>>>*
+  getEdges() const;
+
+  bool hasSolution() const;
 
  private:
   StateLimits state_limits_;
@@ -47,14 +53,21 @@ class RRT {
   std::shared_ptr<GridCollisionChecker> collision_checker_;
 
   std::vector<std::shared_ptr<Vertex>> vertices_;
+  std::vector<std::pair<std::shared_ptr<Vertex>, std::shared_ptr<Vertex>>>
+      edges_;
+  std::shared_ptr<Vertex> start_vertex_;
+  std::shared_ptr<Vertex> goal_vertex_;
 
   std::uniform_real_distribution<float> x_dis_;
   std::uniform_real_distribution<float> y_dis_;
   std::uniform_real_distribution<float> theta_dis_;
 
   double delta_q_;
+  double interpolation_dist_;
+  double goal_radius_;
 
   bool stopped_;
+  bool solution_found_;
 };
 
 }  // namespace psrr_planner
