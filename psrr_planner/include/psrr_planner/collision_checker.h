@@ -57,6 +57,9 @@ class GridCollisionChecker {
    */
   bool isCollision(const double x, const double y, const double theta,
                    const std::vector<geometry_msgs::Point>& footprint) {
+    // auto* mutex = costmap_->getMutex();
+    // std::lock_guard<costmap_2d::Costmap2D::mutex_t> lock(*mutex);
+
     // always check the cell corrdinate of the center of the robot
     unsigned int cell_x, cell_y;
     if (!costmap_->worldToMap(x, y, cell_x, cell_y)) return true;

@@ -12,13 +12,15 @@ set(${PROJECT_NAME}_CATKIN_DEPS
   tf2
   tf2_ros
   costmap_2d
+  geometry_msgs
+  interactive_markers
 )
 
 find_package(catkin REQUIRED COMPONENTS ${${PROJECT_NAME}_CATKIN_DEPS})
 
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES ${PROJECT_NAME}
+  LIBRARIES ${PROJECT_NAME}_nodelet
   CATKIN_DEPENDS ${${PROJECT_NAME}_CATKIN_DEPS}
 )
 
@@ -28,6 +30,7 @@ include_directories(
 
 add_library(${PROJECT_NAME}_nodelet
   src/psrr_planner_nodelet.cpp
+  src/rrt.cpp
 )
 target_link_libraries(${PROJECT_NAME}_nodelet
   ${catkin_LIBRARIES}

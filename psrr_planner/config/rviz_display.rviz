@@ -7,6 +7,7 @@ Panels:
         - /Global Options1
         - /Status1
         - /Map2
+        - /MarkerArray1
       Splitter Ratio: 0.5
     Tree Height: 549
   - Class: rviz/Selection
@@ -82,6 +83,14 @@ Visualization Manager:
       Unreliable: false
       Use Timestamp: false
       Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /psrr_planner/markers
+      Name: MarkerArray
+      Namespaces:
+        {}
+      Queue Size: 100
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -147,4 +156,4 @@ Window Geometry:
     collapsed: true
   Width: 1267
   X: 113
-  Y: 136
+  Y: 99

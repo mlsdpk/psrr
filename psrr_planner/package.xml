@@ -18,6 +18,8 @@
   <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <depend>costmap_2d</depend>
+  <depend>geometry_msgs</depend>
+  <depend>interactive_markers</depend>
 
   <export>
     <nodelet plugin="${prefix}/nodelet_plugins.xml" />
