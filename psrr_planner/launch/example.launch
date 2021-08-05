@@ -15,7 +15,9 @@
         <rosparam file="$(find psrr_planner)/launch/global_costmap_params.yaml" command="load" ns="global_costmap"/>
     </node>
 
-    <node pkg="nodelet" type="nodelet" name="psrr_planner_nodelet" args="load psrr_planner/PsrrPlannerNodelet $(arg nodelet_manager)"/> 
+    <node pkg="nodelet" type="nodelet" name="psrr_planner_nodelet" args="load psrr_planner/PsrrPlannerNodelet $(arg nodelet_manager)"> 
+        <rosparam file="$(find psrr_planner)/launch/planner_params.yaml" command="load"/>
+    </node>
 
     <!-- rivz -->
     <node name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)" required="true"/>

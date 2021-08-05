@@ -29,6 +29,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <costmap_2d/costmap_2d_ros.h>
 #include <costmap_2d/footprint.h>
 #include <geometry_msgs/Polygon.h>
+#include <psrr_msgs/FootPrint.h>
 #include <psrr_planner/line_iterator.h>
 
 namespace psrr_planner {
@@ -43,8 +44,11 @@ class GridCollisionChecker {
   /**
    * @brief A constructor for psrr_planner::GridCollisionChecker
    * @param costmap The costmap to collision check against
+   * @param footprint_client shared_ptr ROS service client for footprint
    */
-  GridCollisionChecker(costmap_2d::Costmap2D* costmap) : costmap_{costmap} {}
+  GridCollisionChecker(costmap_2d::Costmap2D* costmap,
+                       std::shared_ptr<ros::ServiceClient> footprint_client)
+      : costmap_{costmap}, footprint_client_{footprint_client} {}
 
   /**
    * @brief Check if the footprint is in collision with the current shared
@@ -52,11 +56,11 @@ class GridCollisionChecker {
    * @param x X coordinate of pose to check against
    * @param y Y coordinate of pose to check against
    * @param theta Angle of pose to check against
-   * @param footprint Untransformed footprint
+   * @param joint_pos n-dimensional joint positions of pose to check against
    * @return boolean if in collision or not.
    */
   bool isCollision(const double x, const double y, const double theta,
-                   const std::vector<geometry_msgs::Point>& footprint) {
+                   const std::vector<float>& joint_pos) {
     // auto* mutex = costmap_->getMutex();
     // std::lock_guard<costmap_2d::Costmap2D::mutex_t> lock(*mutex);
 
@@ -71,7 +75,22 @@ class GridCollisionChecker {
 
     // now we need to check the full polygon footprint of the robot
 
-    // create a new footprint by transforming the current one into desired pose
+    // here we use our shared ros service to get the footprint
+    psrr_msgs::FootPrint footprint_req_msg;
+    for (const auto pos : joint_pos) {
+      footprint_req_msg.request.position.push_back(static_cast<double>(pos));
+    }
+
+    std::vector<geometry_msgs::Point> footprint;
+    if (footprint_client_->call(footprint_req_msg)) {
+      footprint = footprint_req_msg.response.points;
+    } else {
+      ROS_ERROR("Failed to call footprint service.");
+      return -1;
+    }
+
+    // create a new footprint by transforming the current one into desired
+    // pose
     std::vector<geometry_msgs::Point> transformed_footprint;
     costmap_2d::transformFootprint(x, y, theta, footprint,
                                    transformed_footprint);
@@ -145,5 +164,6 @@ class GridCollisionChecker {
 
  private:
   costmap_2d::Costmap2D* costmap_;
+  std::shared_ptr<ros::ServiceClient> footprint_client_;
 };
 }  // namespace psrr_planner

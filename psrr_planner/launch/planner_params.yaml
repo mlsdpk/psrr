@@ -1,0 +1,8 @@
+planner_update_interval: 0.002 # 500Hz
+path_update_interval: 1.0 # 1Hz
+
+# maximum number of vertices in a tree
+max_vertices: 20000
+
+# whether publish footprints of solution path or not
+publish_path_footprints: true
