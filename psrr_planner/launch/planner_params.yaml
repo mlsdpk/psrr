@@ -1,0 +1,33 @@
+planner_update_interval: 0.002 # 500Hz
+path_update_interval: 1.0 # 1Hz
+
+# maximum number of vertices in a tree
+max_vertices: 20000
+
+# whether publish footprints of solution path or not
+publish_path_footprints: true
+
+# if ture, planner will plan in SE(2) space
+use_orientation: true
+
+# initial footprint of the robot
+# this footprint is also used in static collsion checking 
+# if robot does not have joint_pos
+initial_footprint: 
+  x: [1.025, 1.025, -1.025, -1.025]
+  y: [-0.6, 0.6, 0.6, -0.6]
+
+# joint pos limits min and max
+# if user provides these two parameters,
+# we know that we are using reconfiguration
+# with additional R^n space
+joint_pos_limits_min: [0.45, 0.45]
+joint_pos_limits_max: [0.6, 0.6]
+
+# SE(2) representation of robot
+# exactly needs to provide 3 fields (x, y, theta)
+initial_pose: [0.0, 0.0, 0.0]
+
+# number of reconfigurable gaits of the robot
+# must be the same size with joint_pos_limits_min & joint_pos_limits_max
+initial_joint_pos: [0.6, 0.6]
