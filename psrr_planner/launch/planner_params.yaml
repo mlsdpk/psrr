@@ -1,9 +1,6 @@
 planner_update_interval: 0.001 # 500Hz
 path_update_interval: 1.0 # 1Hz
 
-# maximum number of vertices in a tree
-max_vertices: 20000
-
 # whether publish footprints of solution path or not
 publish_path_footprints: true
 
@@ -31,3 +28,32 @@ initial_pose: [0.0, 0.0, 0.0]
 # number of reconfigurable gaits of the robot
 # must be the same size with joint_pos_limits_min & joint_pos_limits_max
 initial_joint_pos: [0.6, 0.6]
+
+## BELOW ARE PLANNER SPECIFIC VARIABLES ##
+
+planner_type: rrt
+
+#################
+## RRT related ##
+#################
+rrt:
+  # maximum number of vertices in a tree
+  max_vertices: 20000
+
+  # maximum distance allowed between two vertices
+  delta_q: 0.8
+
+  # interpolation distance during collsion checking
+  interpolation_dist: 0.01
+
+  # distance between vertex and goal to stop planning
+  goal_radius: 1.1
+
+  # Either use seeding or not
+  use_seed: false
+
+  # if use_seed is true, planner will use 
+  # consistent random samples during sampling process
+  # with this provided seed number (default: 0)
+  seed_number: 0 # optional
+#################

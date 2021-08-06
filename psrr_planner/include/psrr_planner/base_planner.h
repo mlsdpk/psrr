@@ -82,6 +82,11 @@ class BasePlanner {
   bool hasSolution() const { return solution_found_; }
 
   /**
+   * @brief Virtual function for returning the current solution cost
+   */
+  virtual double getSolutionCost() = 0;
+
+  /**
    * @brief Virtual initialization function
    * @param start Initial configuration of the robot in world frame
    * @param goal Final configuration of the robot in world frame

@@ -26,10 +26,17 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <psrr_planner/rrt.h>
 
 namespace psrr_planner {
-RRT::RRT(const StateLimits& state_limits, unsigned int max_vertices,
-         std::shared_ptr<GridCollisionChecker> collision_checker)
+RRT::RRT(const StateLimits& state_limits,
+         std::shared_ptr<GridCollisionChecker> collision_checker,
+         unsigned int max_vertices, double delta_q, double interpolation_dist,
+         double goal_radius, bool use_seed, unsigned int seed_number)
     : BasePlanner(state_limits, collision_checker),
-      max_vertices_{max_vertices} {
+      max_vertices_{max_vertices},
+      delta_q_{delta_q},
+      interpolation_dist_{interpolation_dist},
+      goal_radius_{goal_radius},
+      use_seed_{use_seed},
+      seed_number_{seed_number} {
   // TODO: make sure min and max are actual minimum and maximum limits
   x_dis_ = std::uniform_real_distribution<float>(state_limits_.min_x,
                                                  state_limits_.max_x);
@@ -45,15 +52,15 @@ RRT::RRT(const StateLimits& state_limits, unsigned int max_vertices,
     joint_pos_dis_[i] = std::uniform_real_distribution<float>(
         state_limits_.min_joint_pos[i], state_limits_.max_joint_pos[i]);
   }
+
+  if (use_seed_) {
+    gen_ = std::mt19937(seed_number_);
+  }
 }
 
 RRT::~RRT(){};
 
 void RRT::init(const Vertex& start, const Vertex& goal) {
-  // TODO: make these parameters as ROS params
-  delta_q_ = 0.8;
-  interpolation_dist_ = 0.01;
-  goal_radius_ = 1.1;
   stopped_ = false;
   solution_found_ = false;
 
@@ -69,16 +76,17 @@ void RRT::init(const Vertex& start, const Vertex& goal) {
 }
 
 void RRT::sampleFree(Vertex& v) {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-
-  v.state.x = x_dis_(gen);
-  v.state.y = y_dis_(gen);
-  v.state.theta = theta_dis_(gen);
+  if (!use_seed_) {
+    std::random_device rd;
+    gen_ = std::mt19937(rd());
+  }
+  v.state.x = x_dis_(gen_);
+  v.state.y = y_dis_(gen_);
+  v.state.theta = theta_dis_(gen_);
 
   v.state.joint_pos.resize(joint_pos_dis_.size());
   for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
-    v.state.joint_pos[i] = joint_pos_dis_[i](gen);
+    v.state.joint_pos[i] = joint_pos_dis_[i](gen_);
   }
 }
 
@@ -233,7 +241,6 @@ void RRT::update() {
 
     if (goal_dist < goal_radius_) {
       goal_vertex_->parent = x_new;
-      std::cout << "Solution found. Algorithm stopped." << '\n';
       stopped_ = true;
       solution_found_ = true;
     }
@@ -243,5 +250,15 @@ void RRT::update() {
     std::cout << "Vertices reach maximum limit. Algorithm stopped." << '\n';
     stopped_ = true;
   }
+}
+
+double RRT::getSolutionCost() {
+  double total_cost = 0.0;
+  std::shared_ptr<Vertex> current = goal_vertex_;
+  while (current->parent && current != start_vertex_) {
+    total_cost += distance(*current, *current->parent);
+    current = current->parent;
+  }
+  return total_cost;
 }
 }  // namespace psrr_planner

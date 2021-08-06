@@ -38,12 +38,22 @@ class RRT : public BasePlanner {
   /**
    * @brief A constructor for psrr_planner::RRT
    * @param state_limits The state space of the robot including limits
-   * @param max_vertices Maximum number of vertices in a tree
    * @param collision_checker Grid Collision Checker
+   * @param max_vertices Maximum number of vertices in a tree
+   * @param delta_q Maximum distance allowed between two vertices
+   * @param interpolation_dist Interpolation distance during collsion checking
+   * @param goal_radius Distance between vertex and goal to stop planning
+   * @param use_seed Either use seeding or not (default: false)
+   * @param seed_number Seed number to be used if use_seed is true. (default: 0)
    */
-  RRT(const StateLimits& state_limits, unsigned int max_vertices,
-      std::shared_ptr<GridCollisionChecker> collision_checker);
+  RRT(const StateLimits& state_limits,
+      std::shared_ptr<GridCollisionChecker> collision_checker,
+      unsigned int max_vertices, double delta_q, double interpolation_dist,
+      double goal_radius, bool use_seed = false, unsigned int seed_number = 0);
 
+  /**
+   * @brief A destructor for psrr_planner::RRT
+   */
   virtual ~RRT();
 
   /**
@@ -59,6 +69,12 @@ class RRT : public BasePlanner {
    * start from scratch)
    */
   void update() override;
+
+  /**
+   * @brief Function for finding the solution and calculating the path cost
+   * @return Solution cost
+   */
+  double getSolutionCost() override;
 
  private:
   /**
@@ -106,10 +122,14 @@ class RRT : public BasePlanner {
   std::uniform_real_distribution<float> theta_dis_;
   std::vector<std::uniform_real_distribution<float>> joint_pos_dis_;
 
+  std::mt19937 gen_;
+
+  unsigned int max_vertices_;
   double delta_q_;
   double interpolation_dist_;
   double goal_radius_;
-  unsigned int max_vertices_;
+  bool use_seed_;
+  unsigned int seed_number_;
   bool stopped_;
 };
 

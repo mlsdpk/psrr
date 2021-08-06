@@ -187,18 +187,74 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     // create collision checker object
     // and passes costmap pointer to it
     if (use_static_collision_checking_) {
+      ROS_INFO("Static collision checking is used.");
       collision_checker_.reset(new GridCollisionChecker(
           planner_costmap_ros_->getCostmap(), footprint_));
     } else {
+      ROS_INFO("Dynamic collision checking is used.");
       collision_checker_.reset(new GridCollisionChecker(
           planner_costmap_ros_->getCostmap(), footprint_client_));
     }
 
-    // create rrt object
-    // TODO: choose algorithm based on ros parameter
+    std::string planner_type;
+    if (private_nh_.hasParam("planner_type")) {
+      private_nh_.param<std::string>("planner_type", planner_type,
+                                     planner_type);
+      if (planner_type == "rrt") {
+        ROS_INFO("Planner Type: rrt");
+        // we need to check planner specific parameters are given
+        if (private_nh_.hasParam("rrt/max_vertices") &&
+            private_nh_.hasParam("rrt/delta_q") &&
+            private_nh_.hasParam("rrt/interpolation_dist") &&
+            private_nh_.hasParam("rrt/goal_radius")) {
+          int max_vertices;
+          double delta_q, interpolation_dist, goal_radius;
+          private_nh_.param<int>("rrt/max_vertices", max_vertices,
+                                 max_vertices);
+          private_nh_.param<double>("rrt/delta_q", delta_q, delta_q);
+          private_nh_.param<double>("rrt/interpolation_dist",
+                                    interpolation_dist, interpolation_dist);
+          private_nh_.param<double>("rrt/goal_radius", goal_radius,
+                                    goal_radius);
 
-    rrt_.reset(new RRT(state_limits, max_vertices_, collision_checker_));
-    ROS_INFO("Planner created with %d maximum vertices.", max_vertices_);
+          // now check seeding is used or not
+          bool use_seed = false;
+          int seed_number = 0;
+
+          if (private_nh_.hasParam("rrt/use_seed")) {
+            private_nh_.param<bool>("rrt/use_seed", use_seed, use_seed);
+            if (use_seed) {
+              if (private_nh_.hasParam("rrt/seed_number")) {
+                private_nh_.param<int>("rrt/seed_number", seed_number,
+                                       seed_number);
+                ROS_INFO("Random seed %d provided.", seed_number);
+              } else {
+                ROS_INFO("Default Random seed 0 is used.");
+              }
+            } else {
+              ROS_INFO("Random seeding is used.");
+            }
+          } else {
+            ROS_WARN(
+                "RRT use_seed parameter not found. Using random seeding...");
+          }
+
+          // create rrt planner
+          planner_.reset(new RRT(state_limits, collision_checker_, max_vertices,
+                                 delta_q, interpolation_dist, goal_radius,
+                                 use_seed, seed_number));
+        } else {
+          ROS_ERROR("RRT specific parameters not found.");
+          return;
+        }
+      } else {
+        ROS_ERROR("Invalid planner type.");
+        return;
+      }
+    } else {
+      ROS_ERROR("No planner type found. Make sure planner_type is set.");
+      return;
+    }
 
     // initial pose can be set from ros param
     // (In real planning case, this needs to get it from tf [map->base_link])
@@ -321,26 +377,37 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
              goal_vertex_.state.x, goal_vertex_.state.y,
              goal_vertex_.state.theta);
 
-    rrt_->init(start_vertex_, goal_vertex_);
+    planner_->init(start_vertex_, goal_vertex_);
     has_goal_pose_ = true;
+    planning_finished_ = false;
+    planner_init_time_ = std::chrono::system_clock::now();
   }
 
   void plannerTimerCB(const ros::WallTimerEvent& event) {
     // update rrt tree
 
     if (has_goal_pose_) {
-      if (rrt_->hasSolution()) {
+      if (planner_->hasSolution()) {
         if (!planning_finished_) {
           // TODO: INFO total planning time and final solution cost
+          auto execution_time =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::system_clock::now() - planner_init_time_)
+                  .count();
+          ROS_INFO("Solution found. Planning finished in %ld ms.",
+                   execution_time);
+
+          double solution_cost = planner_->getSolutionCost();
+          ROS_INFO("Solution cost: %f", solution_cost);
           planning_finished_ = true;
         }
       } else {
-        auto init_time = std::chrono::system_clock::now();
-        rrt_->update();
-        auto execution_time =
-            std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::system_clock::now() - init_time)
-                .count();
+        // auto init_time = std::chrono::system_clock::now();
+        planner_->update();
+        // auto execution_time =
+        //     std::chrono::duration_cast<std::chrono::microseconds>(
+        //         std::chrono::system_clock::now() - init_time)
+        //         .count();
         // std::cout << "RRT update step takes " << execution_time << " us"
         //           << std::endl;
       }
@@ -368,7 +435,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       color.b = 0.0;
       color.a = 1.0;
 
-      for (const auto edge : *(rrt_->getEdges())) {
+      for (const auto edge : *(planner_->getEdges())) {
         geometry_msgs::Point p1;
         p1.x = static_cast<double>(edge.first->state.x);
         p1.y = static_cast<double>(edge.first->state.y);
@@ -389,7 +456,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
 
   void pathPublisherTimerCB(const ros::WallTimerEvent& event) {
     // check if rrt has solution or not
-    if (rrt_->hasSolution()) {
+    if (planner_->hasSolution()) {
       psrr_msgs::Path path;
       path.header.frame_id = "map";
       path.header.stamp = ros::Time::now();
@@ -402,8 +469,8 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       footprint_arr.header.frame_id = "map";
       footprint_arr.header.stamp = ros::Time::now();
 
-      std::shared_ptr<Vertex> start_vertex = rrt_->getStartVertex();
-      std::shared_ptr<Vertex> current = rrt_->getGoalVertex();
+      std::shared_ptr<Vertex> start_vertex = planner_->getStartVertex();
+      std::shared_ptr<Vertex> current = planner_->getGoalVertex();
       while (current->parent && current != start_vertex) {
         geometry_msgs::Pose path_pose;
         geometry_msgs::PoseStamped path_pose_stamped;
@@ -509,9 +576,11 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   std::unique_ptr<costmap_2d::Costmap2DROS> planner_costmap_ros_;
   std::shared_ptr<GridCollisionChecker> collision_checker_;
 
-  std::shared_ptr<RRT> rrt_;
+  std::shared_ptr<BasePlanner> planner_;
   Vertex start_vertex_;
   Vertex goal_vertex_;
+
+  std::chrono::system_clock::time_point planner_init_time_;
 
   double planner_update_interval_;
   double path_update_interval_;

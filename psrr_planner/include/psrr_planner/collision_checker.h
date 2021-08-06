@@ -49,9 +49,7 @@ class GridCollisionChecker {
    */
   GridCollisionChecker(costmap_2d::Costmap2D* costmap,
                        const std::vector<geometry_msgs::Point>& footprint)
-      : costmap_{costmap}, footprint_{footprint}, use_static_footprint_{true} {
-    std::cout << "Static collision checker initialized." << std::endl;
-  }
+      : costmap_{costmap}, footprint_{footprint}, use_static_footprint_{true} {}
 
   /**
    * @brief A constructor for psrr_planner::GridCollisionChecker
@@ -63,9 +61,7 @@ class GridCollisionChecker {
                        std::shared_ptr<ros::ServiceClient> footprint_client)
       : costmap_{costmap},
         footprint_client_{footprint_client},
-        use_static_footprint_{false} {
-    std::cout << "Dynamic collision checker initialized." << std::endl;
-  }
+        use_static_footprint_{false} {}
 
   /**
    * @brief Check if the footprint is in collision with the current shared
