@@ -106,7 +106,7 @@ class RRT {
    * @param v New vertex
    */
   void interpolate(const Vertex& from_v, const Vertex& to_v, const double t,
-                   std::shared_ptr<Vertex>& v);
+                   std::shared_ptr<Vertex> v);
 
   /**
    * @brief Check whether collision or not between two vertices

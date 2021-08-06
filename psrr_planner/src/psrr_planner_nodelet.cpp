@@ -68,60 +68,32 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     private_nh_.param<bool>("publish_path_footprints", publish_path_footprints_,
                             false);
 
-    // subscribers
+    // get initial footprint from ros param
+    std::vector<double> initial_footprint_x, initial_footprint_y;
+    if (private_nh_.hasParam("initial_footprint/x") &&
+        private_nh_.hasParam("initial_footprint/y")) {
+      private_nh_.param("initial_footprint/x", initial_footprint_x,
+                        initial_footprint_x);
+      private_nh_.param("initial_footprint/y", initial_footprint_y,
+                        initial_footprint_y);
 
-    // subscriber for receiving goal pose
-    // we just simply subscribe to /move_base_simple/goal
-    // (geometry_msgs/PoseStamped) for now
-    goal_sub_ = nh_.subscribe("/move_base_simple/goal", 1,
-                              &PsrrPlannerNodelet::goalCB, this);
-
-    // publishers
-    tree_markers_pub_ = mt_nh_.advertise<visualization_msgs::MarkerArray>(
-        "/psrr_planner/markers", 10);
-    path_pub_ = mt_nh_.advertise<psrr_msgs::Path>("/psrr_planner/path", 1);
-    path_2d_pub_ = mt_nh_.advertise<nav_msgs::Path>("/psrr_planner/path_2d", 1);
-    footprint_arr_pub_ = mt_nh_.advertise<jsk_recognition_msgs::PolygonArray>(
-        "/psrr_planner/path_footprints", 1);
-
-    ////////////////////////////////////////////////////////////////////////////
-    // Footprint of self-reconfigurable robots cannot be defined as static like
-    // normal robot. As for now, user needs to provide the dynamically changing
-    // footprint of the robot through ROS services. Why? Currently this
-    // footprint is used during the SE(2) collison detection in a 2D occupancy
-    // grid map. This planner will request the footprint of the robot as a
-    // service client. Not sure this is the best way, but for now we'll stick
-    // with this approach
-
-    footprint_client_ = std::make_shared<ros::ServiceClient>(
-        mt_nh_.serviceClient<psrr_msgs::FootPrint>("footprint"));
-
-    // we wait here until we have a footprint server available
-    ROS_INFO("Waiting footprint service...");
-    footprint_client_->waitForExistence();
-    ROS_INFO("Success: Connected to footprint service.");
-    ////////////////////////////////////////////////////////////////////////////
-
-    // TODO: User needs to provide initial footprint with ROS params which is
-    // used for creating costmap
-
-    // fixed hardcoded footprint for now
-    auto p0 = geometry_msgs::Point();
-    p0.x = 1.025;
-    p0.y = -0.45;
-    auto p1 = geometry_msgs::Point();
-    p1.x = 1.025;
-    p1.y = 0.45;
-    auto p2 = geometry_msgs::Point();
-    p2.x = -1.025;
-    p2.y = 0.45;
-    auto p3 = geometry_msgs::Point();
-    p3.x = -1.025;
-    p3.y = -0.45;
-    footprint_.push_back(p0);
-    footprint_.push_back(p1);
-    footprint_.push_back(p2);
-    footprint_.push_back(p3);
+      // check they have the same size or not
+      if (!(initial_footprint_x.size() == initial_footprint_y.size())) {
+        ROS_ERROR("Footprint x and y have different size.");
+        return;
+      }
+      // or empty
+      if (initial_footprint_x.size() == 0 || initial_footprint_y.size() == 0) {
+        ROS_ERROR("Footprint size is empty.");
+        return;
+      }
+    }
+    // create initial footprint
+    footprint_.resize(initial_footprint_x.size());
+    for (std::size_t i = 0; i < initial_footprint_x.size(); ++i) {
+      footprint_[i].x = initial_footprint_x[i];
+      footprint_[i].y = initial_footprint_y[i];
+    }
 
     tf_ = std::make_shared<tf2_ros::Buffer>(ros::Duration(10));
     tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_);
@@ -129,12 +101,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     planner_costmap_ros_.reset(
         new costmap_2d::Costmap2DROS("global_costmap", *tf_));
     planner_costmap_ros_->setUnpaddedRobotFootprint(footprint_);
-
-    // create collision checker object
-    // and passes costmap pointer to it
-    collision_checker_.reset(new GridCollisionChecker(
-        planner_costmap_ros_->getCostmap(), footprint_client_));
-
     planner_costmap_ros_->start();
 
     // find the min and max bounds of the costmap in world coordinate
@@ -157,33 +123,174 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     state_limits.max_y = static_cast<float>(w1_y);
 
     // orientation of state
-    state_limits.min_theta = -M_PI;
-    state_limits.max_theta = M_PI;
+    bool use_orientation;
+    private_nh_.param<bool>("use_orientation", use_orientation, false);
+    if (use_orientation) {
+      state_limits.min_theta = -M_PI;
+      state_limits.max_theta = M_PI;
+    }
+
+    bool use_static_collision_checking = true;
 
     // joint positions of state
-    // TODO: create state limits of joint positions based on user defined ros
-    // params
+    if (private_nh_.hasParam("joint_pos_limits_min") &&
+        private_nh_.hasParam("joint_pos_limits_max")) {
+      std::vector<double> joint_pos_limits_min, joint_pos_limits_max;
+      private_nh_.param("joint_pos_limits_min", joint_pos_limits_min,
+                        joint_pos_limits_min);
+      private_nh_.param("joint_pos_limits_max", joint_pos_limits_max,
+                        joint_pos_limits_max);
+
+      // check to make sure both have the same size
+      if (joint_pos_limits_min.size() != joint_pos_limits_max.size()) {
+        ROS_ERROR("Joint position limits do not have the same size.");
+        return;
+      }
+      // can be empty, but if they are empty, we neglect these joints and don't
+      // use in the planning
+      if (joint_pos_limits_min.size() > 0 && joint_pos_limits_max.size() > 0) {
+        state_limits.min_joint_pos.resize(joint_pos_limits_min.size());
+        state_limits.max_joint_pos.resize(joint_pos_limits_max.size());
+
+        for (std::size_t i = 0; i < joint_pos_limits_min.size(); ++i) {
+          state_limits.min_joint_pos[i] = joint_pos_limits_min[i];
+          state_limits.max_joint_pos[i] = joint_pos_limits_max[i];
+        }
+        use_static_collision_checking = false;
+      }
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+    // Footprint of self-reconfigurable robots cannot be defined as static like
+    // normal robot. As for now, user needs to provide the dynamically changing
+    // footprint of the robot through ROS services. Why? Currently this
+    // footprint is used during the SE(2) collison detection in a 2D occupancy
+    // grid map. This planner will request the footprint of the robot as a
+    // service client. Not sure this is the best way, but for now we'll stick
+    // with this approach
+
+    if (!use_static_collision_checking) {
+      // we wait here until we have a footprint server available
+      ROS_INFO("Waiting footprint service...");
+      ros::service::waitForService("footprint_server");
+      ROS_INFO("Success: Connected to footprint service.");
+
+      // make persistent ros service for faster client calls
+      footprint_client_ = std::make_shared<ros::ServiceClient>(
+          mt_nh_.serviceClient<psrr_msgs::FootPrint>("footprint_server", true));
+    }
+
+    ////////////////////////////////////////////////////////////////////////////
+
+    // create collision checker object
+    // and passes costmap pointer to it
+    if (use_static_collision_checking) {
+      collision_checker_.reset(new GridCollisionChecker(
+          planner_costmap_ros_->getCostmap(), footprint_));
+    } else {
+      collision_checker_.reset(new GridCollisionChecker(
+          planner_costmap_ros_->getCostmap(), footprint_client_));
+    }
 
     // create rrt object
-    // we just directly create this for now
-    // later improve it to make it modular planner algorithm object for
-    // any sampling-based algorithm
+    // TODO: we just directly create this for now
+    // later make rrt class as derived class from some base algorithm class
 
     rrt_.reset(new RRT(state_limits, max_vertices_, collision_checker_));
-
     ROS_INFO("Planner created with %d maximum vertices.", max_vertices_);
 
-    // TODO: we manually provide start and goal pose for now
-    // later get goal pose from rviz 2D nav goal or ros param
+    // initial pose can be set from ros param
+    // (In real planning case, this needs to get it from tf [map->base_link])
+    // if user does not provide inital pose parameter
+    // we assume robot is at (0 m, 0 m, 0 rad) pose
     start_vertex_ = std::make_shared<Vertex>();
-    start_vertex_->state.x = 0.0;
-    start_vertex_->state.y = 0.0;
-    start_vertex_->state.theta = 0.0;
+
+    if (private_nh_.hasParam("initial_pose")) {
+      std::vector<double> initial_pose;
+      private_nh_.param("initial_pose", initial_pose, initial_pose);
+      // this pose exactly needs to have size of 3
+      if (initial_pose.size() == 3) {
+        ROS_INFO(
+            "Robot initial pose starts at given configuration x: %f, y: "
+            "%f, "
+            "theta: %f.",
+            initial_pose[0], initial_pose[1], initial_pose[2]);
+        start_vertex_->state.x = initial_pose[0];
+        start_vertex_->state.y = initial_pose[1];
+        start_vertex_->state.theta = initial_pose[2];
+      } else {
+        // otherwise, we just use default initial pose
+        ROS_WARN(
+            "Initial pose does not have size of 3. Using default configuration "
+            "x: 0.0, y: 0.0, "
+            "theta: 0.0.");
+        start_vertex_->state.x = 0.0;
+        start_vertex_->state.y = 0.0;
+        start_vertex_->state.theta = 0.0;
+      }
+    } else {
+      ROS_INFO(
+          "Robot initial pose starts at default configuration x: 0.0, y: 0.0, "
+          "theta: 0.0.");
+      start_vertex_->state.x = 0.0;
+      start_vertex_->state.y = 0.0;
+      start_vertex_->state.theta = 0.0;
+    }
+
+    if (!use_static_collision_checking) {
+      std::vector<double> initial_joint_pos;
+      if (private_nh_.hasParam("initial_joint_pos")) {
+        private_nh_.param("initial_joint_pos", initial_joint_pos,
+                          initial_joint_pos);
+
+        // check to make sure the same size with joint_pos_limits_min &
+        // joint_pos_limits_max
+        if (initial_joint_pos.size() != state_limits.min_joint_pos.size()) {
+          ROS_ERROR(
+              "Initial joint pos must be the same size with joint pos limits.");
+          return;
+        }
+
+        // check to make sure they are between limits
+        for (std::size_t i = 0; i < initial_joint_pos.size(); ++i) {
+          if (!(initial_joint_pos[i] >= state_limits.min_joint_pos[i] &&
+                initial_joint_pos[i] <= state_limits.max_joint_pos[i])) {
+            ROS_ERROR(
+                "Initial joint pos are not in the given joint pos limits.");
+            return;
+          }
+        }
+
+        // now ok, add those in initial vertex
+        start_vertex_->state.joint_pos.resize(initial_joint_pos.size());
+        for (std::size_t i = 0; i < initial_joint_pos.size(); ++i) {
+          start_vertex_->state.joint_pos[i] = initial_joint_pos[i];
+        }
+      } else {
+        ROS_ERROR("Initial joint pos not provided.");
+        return;
+      }
+    }
+
     goal_vertex_ = std::make_shared<Vertex>();
-    goal_vertex_->state.x = 17.0;
-    goal_vertex_->state.y = -1.0;
-    goal_vertex_->state.theta = 0.0;
-    rrt_->init(start_vertex_, goal_vertex_);
+    has_goal_pose_ = false;
+    planning_finished_ = false;
+
+    // subscribers
+
+    // subscriber for receiving goal pose
+    // we just simply subscribe to /move_base_simple/goal
+    // (geometry_msgs/PoseStamped) for now
+    goal_sub_ = nh_.subscribe("/move_base_simple/goal", 1,
+                              &PsrrPlannerNodelet::goalCB, this);
+
+    // publishers
+    tree_markers_pub_ = mt_nh_.advertise<visualization_msgs::MarkerArray>(
+        "/psrr_planner/markers", 10);
+    path_pub_ = mt_nh_.advertise<psrr_msgs::Path>("/psrr_planner/path", 1);
+    path_2d_pub_ = mt_nh_.advertise<nav_msgs::Path>("/psrr_planner/path_2d", 1);
+    footprint_arr_pub_ = mt_nh_.advertise<jsk_recognition_msgs::PolygonArray>(
+        "/psrr_planner/path_footprints", 1);
 
     // timers
     planner_timer_ =
@@ -198,43 +305,53 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   void goalCB(const geometry_msgs::PoseStamped& msg) {
     // get the desired goal pose
 
-    ///////////////////////////////////////
-    // Testing code for collison checking
-    ///////////////////////////////////////
+    if (has_goal_pose_) {
+      // if already has goal pose
+      // this means user wants to create another plan
+      // TODO: Reset everything and create new goal pose to start planning
+    } else {
+      goal_vertex_->state.x = static_cast<float>(msg.pose.position.x);
+      goal_vertex_->state.y = static_cast<float>(msg.pose.position.y);
+      goal_vertex_->state.theta =
+          static_cast<float>(tf2::getYaw(msg.pose.orientation));
 
-    // we'll test our collision checker based on RVIZ 2D Nav Goal
+      // here we use the same joint pos as the initial pose
+      // TODO: Make this goal joint pos sendable from rviz
+      goal_vertex_->state.joint_pos.resize(
+          start_vertex_->state.joint_pos.size());
+      for (std::size_t i = 0; i < goal_vertex_->state.joint_pos.size(); ++i) {
+        goal_vertex_->state.joint_pos[i] = start_vertex_->state.joint_pos[i];
+      }
 
-    // auto init_time = std::chrono::system_clock::now();
+      ROS_INFO("Goal pose received at x: %f, y: %f, theta: %f.",
+               goal_vertex_->state.x, goal_vertex_->state.y,
+               goal_vertex_->state.theta);
 
-    // bool is_collision = collision_checker_->isCollision(
-    //     msg.pose.position.x, msg.pose.position.y,
-    //     tf2::getYaw(msg.pose.orientation),
-    //     planner_costmap_ros_->getRobotFootprint());
-
-    // auto execution_time =
-    // std::chrono::duration_cast<std::chrono::microseconds>(
-    //                           std::chrono::system_clock::now() - init_time)
-    //                           .count();
-
-    // std::cout << "Collision detection finished in " << execution_time << "
-    // us"
-    //           << std::endl;
-    // std::cout << "Collision status: " << is_collision << std::endl;
-    ///////////////////////////////////////
+      rrt_->init(start_vertex_, goal_vertex_);
+      has_goal_pose_ = true;
+    }
   }
 
   void plannerTimerCB(const ros::WallTimerEvent& event) {
     // update rrt tree
 
-    // auto init_time = std::chrono::system_clock::now();
-    rrt_->update();
-    // rrt_->update(getRobotFootprint());
-    // auto execution_time =
-    // std::chrono::duration_cast<std::chrono::microseconds>(
-    //                           std::chrono::system_clock::now() - init_time)
-    //                           .count();
-    // std::cout << "RRT update step takes " << execution_time << " us"
-    //           << std::endl;
+    if (has_goal_pose_) {
+      if (rrt_->hasSolution()) {
+        if (!planning_finished_) {
+          // TODO: INFO total planning time and final solution cost
+          planning_finished_ = true;
+        }
+      } else {
+        auto init_time = std::chrono::system_clock::now();
+        rrt_->update();
+        auto execution_time =
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::system_clock::now() - init_time)
+                .count();
+        std::cout << "RRT update step takes " << execution_time << " us"
+                  << std::endl;
+      }
+    }
 
     // publish tree markers
     if (tree_markers_pub_.getNumSubscribers()) {
@@ -295,6 +412,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       while (current->parent && current != start_vertex_) {
         geometry_msgs::Pose path_pose;
         geometry_msgs::PoseStamped path_pose_stamped;
+        sensor_msgs::JointState joint_state;
 
         const geometry_msgs::Quaternion orientation(
             tf::createQuaternionMsgFromYaw(current->state.theta));
@@ -307,14 +425,35 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         path_pose_stamped.pose.position.y = current->state.y;
         path_pose_stamped.pose.orientation = orientation;
 
+        joint_state.position.resize(current->state.joint_pos.size());
+        for (std::size_t i = 0; i < joint_state.position.size(); ++i) {
+          joint_state.position[i] =
+              static_cast<double>(current->state.joint_pos[i]);
+        }
+
         if (publish_path_footprints_) {
           geometry_msgs::PolygonStamped polygon_stamped;
           polygon_stamped.header.frame_id = "map";
           polygon_stamped.header.stamp = ros::Time::now();
+
+          // here we use our shared ros service to get the footprint
+          psrr_msgs::FootPrint footprint_req_msg;
+          for (const auto pos : current->state.joint_pos) {
+            footprint_req_msg.request.position.push_back(
+                static_cast<double>(pos));
+          }
+          std::vector<geometry_msgs::Point> footprint;
+          if (footprint_client_->call(footprint_req_msg)) {
+            footprint = footprint_req_msg.response.points;
+          } else {
+            ROS_ERROR("Failed to call footprint service.");
+            return;
+          }
+
           std::vector<geometry_msgs::Point> transformed_footprint;
-          costmap_2d::transformFootprint(
-              current->state.x, current->state.y, current->state.theta,
-              planner_costmap_ros_->getRobotFootprint(), transformed_footprint);
+          costmap_2d::transformFootprint(current->state.x, current->state.y,
+                                         current->state.theta, footprint,
+                                         transformed_footprint);
 
           for (auto& p : transformed_footprint) {
             geometry_msgs::Point32 p32;
@@ -327,6 +466,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         }
 
         path.poses.push_back(path_pose);
+        path.joint_state.push_back(joint_state);
         path_2d.poses.push_back(path_pose_stamped);
 
         current = current->parent;
@@ -377,6 +517,8 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   double path_update_interval_;
   int max_vertices_;
   bool publish_path_footprints_;
+  std::atomic_bool planning_finished_;
+  std::atomic_bool has_goal_pose_;
 
   std::vector<geometry_msgs::Point> footprint_;
 };

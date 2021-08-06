@@ -43,12 +43,29 @@ class GridCollisionChecker {
  public:
   /**
    * @brief A constructor for psrr_planner::GridCollisionChecker
+   * for static footprint collision checking
    * @param costmap The costmap to collision check against
-   * @param footprint_client shared_ptr ROS service client for footprint
+   * @param footprint Static footprint
+   */
+  GridCollisionChecker(costmap_2d::Costmap2D* costmap,
+                       const std::vector<geometry_msgs::Point>& footprint)
+      : costmap_{costmap}, footprint_{footprint}, use_static_footprint_{true} {
+    std::cout << "Static collision checker initialized." << std::endl;
+  }
+
+  /**
+   * @brief A constructor for psrr_planner::GridCollisionChecker
+   * for dynamic footprint collision checking
+   * @param costmap The costmap to collision check against
+   * @param footprint_client shared_ptr ROS service client for dynamic footprint
    */
   GridCollisionChecker(costmap_2d::Costmap2D* costmap,
                        std::shared_ptr<ros::ServiceClient> footprint_client)
-      : costmap_{costmap}, footprint_client_{footprint_client} {}
+      : costmap_{costmap},
+        footprint_client_{footprint_client},
+        use_static_footprint_{false} {
+    std::cout << "Dynamic collision checker initialized." << std::endl;
+  }
 
   /**
    * @brief Check if the footprint is in collision with the current shared
@@ -61,9 +78,6 @@ class GridCollisionChecker {
    */
   bool isCollision(const double x, const double y, const double theta,
                    const std::vector<float>& joint_pos) {
-    // auto* mutex = costmap_->getMutex();
-    // std::lock_guard<costmap_2d::Costmap2D::mutex_t> lock(*mutex);
-
     // always check the cell corrdinate of the center of the robot
     unsigned int cell_x, cell_y;
     if (!costmap_->worldToMap(x, y, cell_x, cell_y)) return true;
@@ -75,26 +89,28 @@ class GridCollisionChecker {
 
     // now we need to check the full polygon footprint of the robot
 
-    // here we use our shared ros service to get the footprint
-    psrr_msgs::FootPrint footprint_req_msg;
-    for (const auto pos : joint_pos) {
-      footprint_req_msg.request.position.push_back(static_cast<double>(pos));
-    }
-
-    std::vector<geometry_msgs::Point> footprint;
-    if (footprint_client_->call(footprint_req_msg)) {
-      footprint = footprint_req_msg.response.points;
-    } else {
-      ROS_ERROR("Failed to call footprint service.");
-      return -1;
-    }
-
     // create a new footprint by transforming the current one into desired
     // pose
     std::vector<geometry_msgs::Point> transformed_footprint;
-    costmap_2d::transformFootprint(x, y, theta, footprint,
-                                   transformed_footprint);
-
+    if (use_static_footprint_) {
+      costmap_2d::transformFootprint(x, y, theta, footprint_,
+                                     transformed_footprint);
+    } else {
+      // here we use our shared ros service to get the footprint
+      psrr_msgs::FootPrint footprint_req_msg;
+      for (const auto pos : joint_pos) {
+        footprint_req_msg.request.position.push_back(static_cast<double>(pos));
+      }
+      std::vector<geometry_msgs::Point> footprint;
+      if (footprint_client_->call(footprint_req_msg)) {
+        footprint = footprint_req_msg.response.points;
+      } else {
+        ROS_ERROR("Failed to call footprint service.");
+        return -1;
+      }
+      costmap_2d::transformFootprint(x, y, theta, footprint,
+                                     transformed_footprint);
+    }
     // now use this transformed footprint to check collision in the costmap
     unsigned int x0, x1, y0, y1;
     double footprint_cost = 0.0;
@@ -164,6 +180,8 @@ class GridCollisionChecker {
 
  private:
   costmap_2d::Costmap2D* costmap_;
+  std::vector<geometry_msgs::Point> footprint_;
   std::shared_ptr<ros::ServiceClient> footprint_client_;
+  bool use_static_footprint_;
 };
 }  // namespace psrr_planner

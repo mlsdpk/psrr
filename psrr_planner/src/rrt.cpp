@@ -39,7 +39,8 @@ RRT::RRT(const StateLimits& state_limits, unsigned int max_vertices,
   theta_dis_ = std::uniform_real_distribution<float>(state_limits_.min_theta,
                                                      state_limits_.max_theta);
 
-  // TODO: check state limits min and max joint pos must be the same size
+  // assume state limits min and max joint pos have the same size
+  // this must be taken care by the outside of the planner
   joint_pos_dis_.resize(state_limits_.min_joint_pos.size());
   for (std::size_t i = 0; i < state_limits_.min_joint_pos.size(); ++i) {
     joint_pos_dis_[i] = std::uniform_real_distribution<float>(
@@ -121,7 +122,7 @@ double RRT::distance(const Vertex& v1, const Vertex& v2) {
 }
 
 void RRT::interpolate(const Vertex& from_v, const Vertex& to_v, const double t,
-                      std::shared_ptr<Vertex>& v) {
+                      std::shared_ptr<Vertex> v) {
   // this interpolation also needs to be separated into two parts for different
   // state spaces
   float x_new, y_new, theta_new;
