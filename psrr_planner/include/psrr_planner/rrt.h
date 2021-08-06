@@ -25,6 +25,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
+#include <psrr_planner/base_planner.h>
 #include <psrr_planner/collision_checker.h>
 #include <psrr_planner/utilities.h>
 
@@ -32,7 +33,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace psrr_planner {
 
-class RRT {
+class RRT : public BasePlanner {
  public:
   /**
    * @brief A constructor for psrr_planner::RRT
@@ -43,38 +44,21 @@ class RRT {
   RRT(const StateLimits& state_limits, unsigned int max_vertices,
       std::shared_ptr<GridCollisionChecker> collision_checker);
 
-  ~RRT();
+  virtual ~RRT();
 
   /**
    * @brief Initialize rrt with start and goal vertices
    * @param start Initial configuration of the robot in world frame
    * @param goal Final configuration of the robot in world frame
    */
-  void init(std::shared_ptr<Vertex> start, std::shared_ptr<Vertex> goal);
+  void init(const Vertex& start, const Vertex& goal) override;
 
   /**
    * @brief Main Update function of the algorithm
    * Simulataneously calling this function will grow/improve the tree (not
    * start from scratch)
    */
-  void update();
-
-  /**
-   * @brief Getter for vertices in a current tree
-   */
-  const std::vector<std::shared_ptr<Vertex>>* getVertices() const;
-
-  /**
-   * @brief Getter for edges in a current tree
-   */
-  const std::vector<
-      std::pair<std::shared_ptr<Vertex>, std::shared_ptr<Vertex>>>*
-  getEdges() const;
-
-  /**
-   * @brief Check whether the solution is available or not
-   */
-  bool hasSolution() const;
+  void update() override;
 
  private:
   /**
@@ -117,14 +101,6 @@ class RRT {
    */
   bool isCollision(const Vertex& from_v, const Vertex& to_v);
 
-  std::shared_ptr<GridCollisionChecker> collision_checker_;
-
-  std::shared_ptr<Vertex> start_vertex_;
-  std::shared_ptr<Vertex> goal_vertex_;
-  std::vector<std::shared_ptr<Vertex>> vertices_;
-  std::vector<std::pair<std::shared_ptr<Vertex>, std::shared_ptr<Vertex>>>
-      edges_;
-
   std::uniform_real_distribution<float> x_dis_;
   std::uniform_real_distribution<float> y_dis_;
   std::uniform_real_distribution<float> theta_dis_;
@@ -133,11 +109,8 @@ class RRT {
   double delta_q_;
   double interpolation_dist_;
   double goal_radius_;
-  StateLimits state_limits_;
   unsigned int max_vertices_;
-
   bool stopped_;
-  bool solution_found_;
 };
 
 }  // namespace psrr_planner

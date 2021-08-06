@@ -64,9 +64,11 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                               planner_update_interval_, 0.002);
     private_nh_.param<double>("path_update_interval", path_update_interval_,
                               1.0);
-    private_nh_.param<int>("max_vertices", max_vertices_, 1000);
     private_nh_.param<bool>("publish_path_footprints", publish_path_footprints_,
                             false);
+
+    // TODO: make this planner specific parameter
+    private_nh_.param<int>("max_vertices", max_vertices_, 1000);
 
     // get initial footprint from ros param
     std::vector<double> initial_footprint_x, initial_footprint_y;
@@ -130,7 +132,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       state_limits.max_theta = M_PI;
     }
 
-    bool use_static_collision_checking = true;
+    use_static_collision_checking_ = true;
 
     // joint positions of state
     if (private_nh_.hasParam("joint_pos_limits_min") &&
@@ -156,7 +158,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           state_limits.min_joint_pos[i] = joint_pos_limits_min[i];
           state_limits.max_joint_pos[i] = joint_pos_limits_max[i];
         }
-        use_static_collision_checking = false;
+        use_static_collision_checking_ = false;
       }
     }
 
@@ -169,7 +171,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     // service client. Not sure this is the best way, but for now we'll stick
     // with this approach
 
-    if (!use_static_collision_checking) {
+    if (!use_static_collision_checking_) {
       // we wait here until we have a footprint server available
       ROS_INFO("Waiting footprint service...");
       ros::service::waitForService("footprint_server");
@@ -184,7 +186,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
 
     // create collision checker object
     // and passes costmap pointer to it
-    if (use_static_collision_checking) {
+    if (use_static_collision_checking_) {
       collision_checker_.reset(new GridCollisionChecker(
           planner_costmap_ros_->getCostmap(), footprint_));
     } else {
@@ -193,8 +195,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     }
 
     // create rrt object
-    // TODO: we just directly create this for now
-    // later make rrt class as derived class from some base algorithm class
+    // TODO: choose algorithm based on ros parameter
 
     rrt_.reset(new RRT(state_limits, max_vertices_, collision_checker_));
     ROS_INFO("Planner created with %d maximum vertices.", max_vertices_);
@@ -203,7 +204,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     // (In real planning case, this needs to get it from tf [map->base_link])
     // if user does not provide inital pose parameter
     // we assume robot is at (0 m, 0 m, 0 rad) pose
-    start_vertex_ = std::make_shared<Vertex>();
 
     if (private_nh_.hasParam("initial_pose")) {
       std::vector<double> initial_pose;
@@ -215,29 +215,29 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
             "%f, "
             "theta: %f.",
             initial_pose[0], initial_pose[1], initial_pose[2]);
-        start_vertex_->state.x = initial_pose[0];
-        start_vertex_->state.y = initial_pose[1];
-        start_vertex_->state.theta = initial_pose[2];
+        start_vertex_.state.x = initial_pose[0];
+        start_vertex_.state.y = initial_pose[1];
+        start_vertex_.state.theta = initial_pose[2];
       } else {
         // otherwise, we just use default initial pose
         ROS_WARN(
             "Initial pose does not have size of 3. Using default configuration "
             "x: 0.0, y: 0.0, "
             "theta: 0.0.");
-        start_vertex_->state.x = 0.0;
-        start_vertex_->state.y = 0.0;
-        start_vertex_->state.theta = 0.0;
+        start_vertex_.state.x = 0.0;
+        start_vertex_.state.y = 0.0;
+        start_vertex_.state.theta = 0.0;
       }
     } else {
       ROS_INFO(
           "Robot initial pose starts at default configuration x: 0.0, y: 0.0, "
           "theta: 0.0.");
-      start_vertex_->state.x = 0.0;
-      start_vertex_->state.y = 0.0;
-      start_vertex_->state.theta = 0.0;
+      start_vertex_.state.x = 0.0;
+      start_vertex_.state.y = 0.0;
+      start_vertex_.state.theta = 0.0;
     }
 
-    if (!use_static_collision_checking) {
+    if (!use_static_collision_checking_) {
       std::vector<double> initial_joint_pos;
       if (private_nh_.hasParam("initial_joint_pos")) {
         private_nh_.param("initial_joint_pos", initial_joint_pos,
@@ -262,9 +262,9 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         }
 
         // now ok, add those in initial vertex
-        start_vertex_->state.joint_pos.resize(initial_joint_pos.size());
+        start_vertex_.state.joint_pos.resize(initial_joint_pos.size());
         for (std::size_t i = 0; i < initial_joint_pos.size(); ++i) {
-          start_vertex_->state.joint_pos[i] = initial_joint_pos[i];
+          start_vertex_.state.joint_pos[i] = initial_joint_pos[i];
         }
       } else {
         ROS_ERROR("Initial joint pos not provided.");
@@ -272,7 +272,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       }
     }
 
-    goal_vertex_ = std::make_shared<Vertex>();
     has_goal_pose_ = false;
     planning_finished_ = false;
 
@@ -305,31 +304,25 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   void goalCB(const geometry_msgs::PoseStamped& msg) {
     // get the desired goal pose
 
-    if (has_goal_pose_) {
-      // if already has goal pose
-      // this means user wants to create another plan
-      // TODO: Reset everything and create new goal pose to start planning
-    } else {
-      goal_vertex_->state.x = static_cast<float>(msg.pose.position.x);
-      goal_vertex_->state.y = static_cast<float>(msg.pose.position.y);
-      goal_vertex_->state.theta =
-          static_cast<float>(tf2::getYaw(msg.pose.orientation));
+    goal_vertex_.state.x = static_cast<float>(msg.pose.position.x);
+    goal_vertex_.state.y = static_cast<float>(msg.pose.position.y);
+    goal_vertex_.state.theta =
+        static_cast<float>(tf2::getYaw(msg.pose.orientation));
 
-      // here we use the same joint pos as the initial pose
-      // TODO: Make this goal joint pos sendable from rviz
-      goal_vertex_->state.joint_pos.resize(
-          start_vertex_->state.joint_pos.size());
-      for (std::size_t i = 0; i < goal_vertex_->state.joint_pos.size(); ++i) {
-        goal_vertex_->state.joint_pos[i] = start_vertex_->state.joint_pos[i];
-      }
-
-      ROS_INFO("Goal pose received at x: %f, y: %f, theta: %f.",
-               goal_vertex_->state.x, goal_vertex_->state.y,
-               goal_vertex_->state.theta);
-
-      rrt_->init(start_vertex_, goal_vertex_);
-      has_goal_pose_ = true;
+    // here we use the same joint pos as the initial pose
+    // TODO: Make this goal joint pos sendable from rviz
+    goal_vertex_.state.joint_pos.clear();
+    goal_vertex_.state.joint_pos.resize(start_vertex_.state.joint_pos.size());
+    for (std::size_t i = 0; i < goal_vertex_.state.joint_pos.size(); ++i) {
+      goal_vertex_.state.joint_pos[i] = start_vertex_.state.joint_pos[i];
     }
+
+    ROS_INFO("Goal pose received at x: %f, y: %f, theta: %f.",
+             goal_vertex_.state.x, goal_vertex_.state.y,
+             goal_vertex_.state.theta);
+
+    rrt_->init(start_vertex_, goal_vertex_);
+    has_goal_pose_ = true;
   }
 
   void plannerTimerCB(const ros::WallTimerEvent& event) {
@@ -348,8 +341,8 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
             std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::system_clock::now() - init_time)
                 .count();
-        std::cout << "RRT update step takes " << execution_time << " us"
-                  << std::endl;
+        // std::cout << "RRT update step takes " << execution_time << " us"
+        //           << std::endl;
       }
     }
 
@@ -364,6 +357,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       vertices_marker.header.stamp = ros::Time::now();
       vertices_marker.ns = "edges";
       vertices_marker.id = 0;
+      vertices_marker.action = visualization_msgs::Marker::ADD;
       vertices_marker.type = visualization_msgs::Marker::LINE_LIST;
       vertices_marker.pose.orientation.w = 1.0;
       vertices_marker.scale.x = 0.01;
@@ -408,8 +402,9 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       footprint_arr.header.frame_id = "map";
       footprint_arr.header.stamp = ros::Time::now();
 
-      std::shared_ptr<Vertex> current = goal_vertex_;
-      while (current->parent && current != start_vertex_) {
+      std::shared_ptr<Vertex> start_vertex = rrt_->getStartVertex();
+      std::shared_ptr<Vertex> current = rrt_->getGoalVertex();
+      while (current->parent && current != start_vertex) {
         geometry_msgs::Pose path_pose;
         geometry_msgs::PoseStamped path_pose_stamped;
         sensor_msgs::JointState joint_state;
@@ -436,18 +431,23 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           polygon_stamped.header.frame_id = "map";
           polygon_stamped.header.stamp = ros::Time::now();
 
-          // here we use our shared ros service to get the footprint
-          psrr_msgs::FootPrint footprint_req_msg;
-          for (const auto pos : current->state.joint_pos) {
-            footprint_req_msg.request.position.push_back(
-                static_cast<double>(pos));
-          }
           std::vector<geometry_msgs::Point> footprint;
-          if (footprint_client_->call(footprint_req_msg)) {
-            footprint = footprint_req_msg.response.points;
+
+          if (use_static_collision_checking_) {
+            footprint = planner_costmap_ros_->getUnpaddedRobotFootprint();
           } else {
-            ROS_ERROR("Failed to call footprint service.");
-            return;
+            // here we use our shared ros service to get the footprint
+            psrr_msgs::FootPrint footprint_req_msg;
+            for (const auto pos : current->state.joint_pos) {
+              footprint_req_msg.request.position.push_back(
+                  static_cast<double>(pos));
+            }
+            if (footprint_client_->call(footprint_req_msg)) {
+              footprint = footprint_req_msg.response.points;
+            } else {
+              ROS_ERROR("Failed to call footprint service.");
+              return;
+            }
           }
 
           std::vector<geometry_msgs::Point> transformed_footprint;
@@ -510,8 +510,8 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   std::shared_ptr<GridCollisionChecker> collision_checker_;
 
   std::shared_ptr<RRT> rrt_;
-  std::shared_ptr<Vertex> start_vertex_;
-  std::shared_ptr<Vertex> goal_vertex_;
+  Vertex start_vertex_;
+  Vertex goal_vertex_;
 
   double planner_update_interval_;
   double path_update_interval_;
@@ -519,6 +519,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   bool publish_path_footprints_;
   std::atomic_bool planning_finished_;
   std::atomic_bool has_goal_pose_;
+  std::atomic_bool use_static_collision_checking_;
 
   std::vector<geometry_msgs::Point> footprint_;
 };

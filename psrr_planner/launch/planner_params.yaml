@@ -1,4 +1,4 @@
-planner_update_interval: 0.002 # 500Hz
+planner_update_interval: 0.001 # 500Hz
 path_update_interval: 1.0 # 1Hz
 
 # maximum number of vertices in a tree

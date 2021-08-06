@@ -28,9 +28,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace psrr_planner {
 RRT::RRT(const StateLimits& state_limits, unsigned int max_vertices,
          std::shared_ptr<GridCollisionChecker> collision_checker)
-    : state_limits_{state_limits},
-      max_vertices_{max_vertices},
-      collision_checker_{collision_checker} {
+    : BasePlanner(state_limits, collision_checker),
+      max_vertices_{max_vertices} {
   // TODO: make sure min and max are actual minimum and maximum limits
   x_dis_ = std::uniform_real_distribution<float>(state_limits_.min_x,
                                                  state_limits_.max_x);
@@ -46,23 +45,25 @@ RRT::RRT(const StateLimits& state_limits, unsigned int max_vertices,
     joint_pos_dis_[i] = std::uniform_real_distribution<float>(
         state_limits_.min_joint_pos[i], state_limits_.max_joint_pos[i]);
   }
-
-  start_vertex_ = std::make_shared<Vertex>();
-  goal_vertex_ = std::make_shared<Vertex>();
 }
 
 RRT::~RRT(){};
 
-void RRT::init(std::shared_ptr<Vertex> start, std::shared_ptr<Vertex> goal) {
+void RRT::init(const Vertex& start, const Vertex& goal) {
   // TODO: make these parameters as ROS params
-  delta_q_ = 0.5;
+  delta_q_ = 0.8;
   interpolation_dist_ = 0.01;
-  goal_radius_ = 0.5;
+  goal_radius_ = 1.1;
   stopped_ = false;
   solution_found_ = false;
 
-  start_vertex_ = start;
-  goal_vertex_ = goal;
+  start_vertex_ = std::make_shared<Vertex>();
+  goal_vertex_ = std::make_shared<Vertex>();
+  start_vertex_->state = start.state;
+  goal_vertex_->state = goal.state;
+
+  vertices_.clear();
+  edges_.clear();
 
   vertices_.emplace_back(start_vertex_);
 }
@@ -243,15 +244,4 @@ void RRT::update() {
     stopped_ = true;
   }
 }
-
-const std::vector<std::shared_ptr<Vertex>>* RRT::getVertices() const {
-  return &vertices_;
-}
-
-const std::vector<std::pair<std::shared_ptr<Vertex>, std::shared_ptr<Vertex>>>*
-RRT::getEdges() const {
-  return &edges_;
-}
-
-bool RRT::hasSolution() const { return solution_found_; }
 }  // namespace psrr_planner
