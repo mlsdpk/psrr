@@ -25,36 +25,41 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
-#include <psrr_planner/base_planner.h>
 #include <psrr_planner/collision_checker.h>
+#include <psrr_planner/planners/base_planner.h>
 #include <psrr_planner/utilities.h>
 
 #include <random>
 
 namespace psrr_planner {
 
-class RRT : public BasePlanner {
+class RRTStar : public BasePlanner {
  public:
   /**
    * @brief A constructor for psrr_planner::RRT
    * @param state_limits The state space of the robot including limits
    * @param collision_checker Grid Collision Checker
    * @param max_vertices Maximum number of vertices in a tree
-   * @param delta_q Maximum distance allowed between two vertices
+   * @param goal_parent_size_interval Only find parent of goal vertex for fix
+   * amount of vertices interval
+   * @param max_distance Maximum distance allowed between two vertices
+   * @param r_rrt Rewiring factor
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
    * @param use_seed Either use seeding or not (default: false)
    * @param seed_number Seed number to be used if use_seed is true. (default: 0)
    */
-  RRT(const StateLimits& state_limits,
-      std::shared_ptr<GridCollisionChecker> collision_checker,
-      unsigned int max_vertices, double delta_q, double interpolation_dist,
-      double goal_radius, bool use_seed = false, unsigned int seed_number = 0);
+  RRTStar(const StateLimits& state_limits,
+          std::shared_ptr<GridCollisionChecker> collision_checker,
+          unsigned int max_vertices, unsigned int goal_parent_size_interval,
+          double max_distance, double r_rrt, double interpolation_dist,
+          double goal_radius, bool use_seed = false,
+          unsigned int seed_number = 0);
 
   /**
    * @brief A destructor for psrr_planner::RRT
    */
-  virtual ~RRT();
+  virtual ~RRTStar();
 
   /**
    * @brief Initialize rrt with start and goal vertices
@@ -82,54 +87,31 @@ class RRT : public BasePlanner {
    * state variables
    * @param v Sampled vertex
    */
-  void sampleFree(Vertex& v);
+  void sampleFree(const std::shared_ptr<Vertex>& v);
 
   /**
    * @brief Find the nearest neighbour in a tree
    * @param v Nearest vertex
    */
-  void nearest(const Vertex& x_rand, std::shared_ptr<Vertex>& x_near);
+  void nearest(const std::shared_ptr<const Vertex>& x_rand,
+               std::shared_ptr<Vertex>& x_near);
 
   /**
-   * @brief Calculate distance between two vertices
-   * Distance function is separated into two parts for R^n and SO(2) state
-   * spaces
-   * @return distance between two vertices
+   * @brief Find all the nearest neighbours inside the radius of particular
+   * vertex provided
+   * @param x_new Target vertex
+   * @param X_near Vector of nearest neighbours
    */
-  double distance(const Vertex& v1, const Vertex& v2);
+  void near(const std::shared_ptr<const Vertex>& x_new,
+            std::vector<std::shared_ptr<Vertex>>& X_near);
 
-  /**
-   * @brief Find the new interpolated vertex from from_v vertex to to_v vertex
-   * @param from_v Starting vertex
-   * @param to_v Ending vertex
-   * @param t Interpolation distance
-   * @param v New vertex
-   */
-  void interpolate(const Vertex& from_v, const Vertex& to_v, const double t,
-                   std::shared_ptr<Vertex> v);
-
-  /**
-   * @brief Check whether collision or not between two vertices
-   * This function assumes from_v vertex is collision-free
-   * @param from_v Starting vertex
-   * @param to_v Ending vertex
-   * @return true if there is a collision otherwise false
-   */
-  bool isCollision(const Vertex& from_v, const Vertex& to_v);
-
-  std::uniform_real_distribution<float> x_dis_;
-  std::uniform_real_distribution<float> y_dis_;
-  std::uniform_real_distribution<float> theta_dis_;
-  std::vector<std::uniform_real_distribution<float>> joint_pos_dis_;
-
-  std::mt19937 gen_;
+  double cost(std::shared_ptr<Vertex> v);
 
   unsigned int max_vertices_;
-  double delta_q_;
-  double interpolation_dist_;
+  unsigned int goal_parent_size_interval_;
+  double r_rrt_;
+  double max_distance_;
   double goal_radius_;
-  bool use_seed_;
-  unsigned int seed_number_;
   bool stopped_;
 };
 

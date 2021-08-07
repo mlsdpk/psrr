@@ -34,7 +34,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <psrr_msgs/FootPrint.h>
 #include <psrr_msgs/Path.h>
 #include <psrr_planner/collision_checker.h>
-#include <psrr_planner/rrt.h>
+#include <psrr_planner/planners/rrt.h>
 #include <ros/ros.h>
 #include <tf/transform_datatypes.h>
 #include <tf2/convert.h>
@@ -66,9 +66,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                               1.0);
     private_nh_.param<bool>("publish_path_footprints", publish_path_footprints_,
                             false);
-
-    // TODO: make this planner specific parameter
-    private_nh_.param<int>("max_vertices", max_vertices_, 1000);
 
     // get initial footprint from ros param
     std::vector<double> initial_footprint_x, initial_footprint_y;
@@ -200,6 +197,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     if (private_nh_.hasParam("planner_type")) {
       private_nh_.param<std::string>("planner_type", planner_type,
                                      planner_type);
+      // RRT
       if (planner_type == "rrt") {
         ROS_INFO("Planner Type: rrt");
         // we need to check planner specific parameters are given
@@ -247,6 +245,11 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           ROS_ERROR("RRT specific parameters not found.");
           return;
         }
+      }
+      // RRT*
+      else if (planner_type == "rrt*") {
+        ROS_INFO("Planner Type: rrt*");
+        // TODO: Add rrt*
       } else {
         ROS_ERROR("Invalid planner type.");
         return;
@@ -330,6 +333,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
 
     has_goal_pose_ = false;
     planning_finished_ = false;
+    planner_initialized_ = false;
 
     // subscribers
 
@@ -377,19 +381,23 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
              goal_vertex_.state.x, goal_vertex_.state.y,
              goal_vertex_.state.theta);
 
-    planner_->init(start_vertex_, goal_vertex_);
     has_goal_pose_ = true;
     planning_finished_ = false;
-    planner_init_time_ = std::chrono::system_clock::now();
+    planner_initialized_ = false;
   }
 
   void plannerTimerCB(const ros::WallTimerEvent& event) {
     // update rrt tree
 
     if (has_goal_pose_) {
+      if (!planner_initialized_) {
+        planner_->init(start_vertex_, goal_vertex_);
+        planner_init_time_ = std::chrono::system_clock::now();
+        planner_initialized_ = true;
+      }
+
       if (planner_->hasSolution()) {
         if (!planning_finished_) {
-          // TODO: INFO total planning time and final solution cost
           auto execution_time =
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::system_clock::now() - planner_init_time_)
@@ -589,6 +597,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   std::atomic_bool planning_finished_;
   std::atomic_bool has_goal_pose_;
   std::atomic_bool use_static_collision_checking_;
+  std::atomic_bool planner_initialized_;
 
   std::vector<geometry_msgs::Point> footprint_;
 };
