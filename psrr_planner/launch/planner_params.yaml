@@ -31,7 +31,7 @@ initial_joint_pos: [0.6, 0.6]
 
 ## BELOW ARE PLANNER SPECIFIC VARIABLES ##
 
-planner_type: rrt
+planner_type: rrt_star
 
 #################
 ## RRT related ##
@@ -48,6 +48,37 @@ rrt:
 
   # distance between vertex and goal to stop planning
   goal_radius: 1.1
+
+  # Either use seeding or not
+  use_seed: false
+
+  # if use_seed is true, planner will use 
+  # consistent random samples during sampling process
+  # with this provided seed number (default: 0)
+  seed_number: 0 # optional
+#################
+
+##################
+## RRT* related ##
+##################
+rrt_star:
+  # maximum number of vertices in a tree
+  max_vertices: 10000
+
+  # Only find parent of goal vertex for fix amount of vertices interval
+  goal_parent_size_interval: 500
+
+  # maximum distance allowed between two vertices
+  max_distance: 1.5
+
+  # Rewiring factor
+  r_rrt: 3.1
+
+  # interpolation distance during collsion checking
+  interpolation_dist: 0.01
+
+  # distance between vertex and goal to stop planning
+  goal_radius: 1.5
 
   # Either use seeding or not
   use_seed: false

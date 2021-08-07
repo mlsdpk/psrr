@@ -29,6 +29,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <psrr_planner/utilities.h>
 
 #include <memory>
+#include <random>
 #include <vector>
 
 namespace psrr_planner {
@@ -38,17 +39,19 @@ class BasePlanner {
    * @brief A constructor for psrr_planner::BasePlanner abstract class
    * @param state_limits The state space of the robot including limits
    * @param collision_checker Grid Collision Checker
+   * @param interpolation_dist Interpolation distance during collsion checking
+   * @param use_seed Either use seeding or not (default: false)
+   * @param seed_number Seed number to be used if use_seed is true. (default: 0)
    */
   BasePlanner(const StateLimits& state_limits,
-              std::shared_ptr<GridCollisionChecker> collision_checker)
-      : state_limits_{state_limits},
-        collision_checker_{collision_checker},
-        solution_found_{false} {}
+              std::shared_ptr<GridCollisionChecker> collision_checker,
+              double interpolation_dist, bool use_seed = false,
+              unsigned int seed_number = 0);
 
   /**
    * @brief A destructor for psrr_planner::BasePlanner abstract class
    */
-  virtual ~BasePlanner() {}
+  virtual ~BasePlanner();
 
   /**
    * @brief Getter for start vertex
@@ -82,6 +85,11 @@ class BasePlanner {
   bool hasSolution() const { return solution_found_; }
 
   /**
+   * @brief Check whether planning is finsihed or not
+   */
+  bool isPlanningFinished() const { return planning_finished_; }
+
+  /**
    * @brief Virtual function for returning the current solution cost
    */
   virtual double getSolutionCost() = 0;
@@ -101,6 +109,37 @@ class BasePlanner {
   virtual void update() = 0;
 
  protected:
+  /**
+   * @brief Calculate distance between two vertices
+   * Distance function is separated into two parts for R^n and SO(2) state
+   * spaces
+   * @return distance between two vertices
+   */
+  double distance(const std::shared_ptr<const Vertex>& v1,
+                  const std::shared_ptr<const Vertex>& v2);
+
+  /**
+   * @brief Find the new interpolated vertex from from_v vertex to to_v
+   * vertex
+   * @param from_v Starting vertex
+   * @param to_v Ending vertex
+   * @param t Interpolation distance
+   * @param v New vertex
+   */
+  void interpolate(const std::shared_ptr<const Vertex>& from_v,
+                   const std::shared_ptr<const Vertex>& to_v, const double t,
+                   const std::shared_ptr<Vertex>& v);
+
+  /**
+   * @brief Check whether collision or not between two vertices
+   * This function assumes from_v vertex is collision-free
+   * @param from_v Starting vertex
+   * @param to_v Ending vertex
+   * @return true if there is a collision otherwise false
+   */
+  bool isCollision(const std::shared_ptr<const Vertex>& from_v,
+                   const std::shared_ptr<const Vertex>& to_v);
+
   StateLimits state_limits_;
   std::shared_ptr<GridCollisionChecker> collision_checker_;
   std::shared_ptr<Vertex> start_vertex_;
@@ -109,6 +148,21 @@ class BasePlanner {
   std::vector<std::pair<std::shared_ptr<Vertex>, std::shared_ptr<Vertex>>>
       edges_;
 
+  std::uniform_real_distribution<float> x_dis_;
+  std::uniform_real_distribution<float> y_dis_;
+  std::uniform_real_distribution<float> theta_dis_;
+  std::vector<std::uniform_real_distribution<float>> joint_pos_dis_;
+
+  /**
+   * @brief Random number generator
+   */
+  std::mt19937 rn_gen_;
+  bool use_seed_;
+  unsigned int seed_number_;
+
+  double interpolation_dist_;
+  int state_dimensions_;
   bool solution_found_;
+  bool planning_finished_;
 };
 }  // namespace psrr_planner

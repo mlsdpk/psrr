@@ -30,7 +30,9 @@ include_directories(
 
 add_library(${PROJECT_NAME}_nodelet
   src/psrr_planner_nodelet.cpp
-  src/rrt.cpp
+  src/planners/rrt.cpp
+  src/planners/rrt_star.cpp
+  src/planners/base_planner.cpp
 )
 target_link_libraries(${PROJECT_NAME}_nodelet
   ${catkin_LIBRARIES}

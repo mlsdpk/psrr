@@ -34,7 +34,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <psrr_msgs/FootPrint.h>
 #include <psrr_msgs/Path.h>
 #include <psrr_planner/collision_checker.h>
-#include <psrr_planner/rrt.h>
+#include <psrr_planner/planners/rrt.h>
+#include <psrr_planner/planners/rrt_star.h>
 #include <ros/ros.h>
 #include <tf/transform_datatypes.h>
 #include <tf2/convert.h>
@@ -66,9 +67,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                               1.0);
     private_nh_.param<bool>("publish_path_footprints", publish_path_footprints_,
                             false);
-
-    // TODO: make this planner specific parameter
-    private_nh_.param<int>("max_vertices", max_vertices_, 1000);
 
     // get initial footprint from ros param
     std::vector<double> initial_footprint_x, initial_footprint_y;
@@ -200,6 +198,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     if (private_nh_.hasParam("planner_type")) {
       private_nh_.param<std::string>("planner_type", planner_type,
                                      planner_type);
+      // RRT
       if (planner_type == "rrt") {
         ROS_INFO("Planner Type: rrt");
         // we need to check planner specific parameters are given
@@ -243,6 +242,65 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           planner_.reset(new RRT(state_limits, collision_checker_, max_vertices,
                                  delta_q, interpolation_dist, goal_radius,
                                  use_seed, seed_number));
+        } else {
+          ROS_ERROR("RRT specific parameters not found.");
+          return;
+        }
+      }
+      // RRT*
+      else if (planner_type == "rrt_star") {
+        ROS_INFO("Planner Type: rrt_star");
+        // TODO: Add rrt*
+        // we need to check planner specific parameters are given
+        if (private_nh_.hasParam("rrt_star/max_vertices") &&
+            private_nh_.hasParam("rrt_star/goal_parent_size_interval") &&
+            private_nh_.hasParam("rrt_star/max_distance") &&
+            private_nh_.hasParam("rrt_star/r_rrt") &&
+            private_nh_.hasParam("rrt_star/interpolation_dist") &&
+            private_nh_.hasParam("rrt_star/goal_radius")) {
+          int max_vertices, goal_parent_size_interval;
+          double max_distance, r_rrt, interpolation_dist, goal_radius;
+          private_nh_.param<int>("rrt_star/max_vertices", max_vertices,
+                                 max_vertices);
+          private_nh_.param<int>("rrt_star/goal_parent_size_interval",
+                                 goal_parent_size_interval,
+                                 goal_parent_size_interval);
+          private_nh_.param<double>("rrt_star/max_distance", max_distance,
+                                    max_distance);
+          private_nh_.param<double>("rrt_star/r_rrt", r_rrt, r_rrt);
+          private_nh_.param<double>("rrt_star/interpolation_dist",
+                                    interpolation_dist, interpolation_dist);
+          private_nh_.param<double>("rrt_star/goal_radius", goal_radius,
+                                    goal_radius);
+
+          // now check seeding is used or not
+          bool use_seed = false;
+          int seed_number = 0;
+
+          if (private_nh_.hasParam("rrt_star/use_seed")) {
+            private_nh_.param<bool>("rrt_star/use_seed", use_seed, use_seed);
+            if (use_seed) {
+              if (private_nh_.hasParam("rrt_star/seed_number")) {
+                private_nh_.param<int>("rrt_star/seed_number", seed_number,
+                                       seed_number);
+                ROS_INFO("Random seed %d provided.", seed_number);
+              } else {
+                ROS_INFO("Default Random seed 0 is used.");
+              }
+            } else {
+              ROS_INFO("Random seeding is used.");
+            }
+          } else {
+            ROS_WARN(
+                "RRT-STAR use_seed parameter not found. Using random "
+                "seeding...");
+          }
+
+          // create rrt-star planner
+          planner_.reset(new RRTStar(state_limits, collision_checker_,
+                                     max_vertices, goal_parent_size_interval,
+                                     max_distance, r_rrt, interpolation_dist,
+                                     goal_radius, use_seed, seed_number));
         } else {
           ROS_ERROR("RRT specific parameters not found.");
           return;
@@ -330,6 +388,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
 
     has_goal_pose_ = false;
     planning_finished_ = false;
+    planner_initialized_ = false;
 
     // subscribers
 
@@ -377,19 +436,23 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
              goal_vertex_.state.x, goal_vertex_.state.y,
              goal_vertex_.state.theta);
 
-    planner_->init(start_vertex_, goal_vertex_);
     has_goal_pose_ = true;
     planning_finished_ = false;
-    planner_init_time_ = std::chrono::system_clock::now();
+    planner_initialized_ = false;
   }
 
   void plannerTimerCB(const ros::WallTimerEvent& event) {
     // update rrt tree
 
     if (has_goal_pose_) {
-      if (planner_->hasSolution()) {
+      if (!planner_initialized_) {
+        planner_->init(start_vertex_, goal_vertex_);
+        planner_init_time_ = std::chrono::system_clock::now();
+        planner_initialized_ = true;
+      }
+
+      if (planner_->isPlanningFinished()) {
         if (!planning_finished_) {
-          // TODO: INFO total planning time and final solution cost
           auto execution_time =
               std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::system_clock::now() - planner_init_time_)
@@ -589,6 +652,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   std::atomic_bool planning_finished_;
   std::atomic_bool has_goal_pose_;
   std::atomic_bool use_static_collision_checking_;
+  std::atomic_bool planner_initialized_;
 
   std::vector<geometry_msgs::Point> footprint_;
 };
