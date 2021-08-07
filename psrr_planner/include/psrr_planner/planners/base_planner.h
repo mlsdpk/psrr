@@ -85,6 +85,11 @@ class BasePlanner {
   bool hasSolution() const { return solution_found_; }
 
   /**
+   * @brief Check whether planning is finsihed or not
+   */
+  bool isPlanningFinished() const { return planning_finished_; }
+
+  /**
    * @brief Virtual function for returning the current solution cost
    */
   virtual double getSolutionCost() = 0;
@@ -158,5 +163,6 @@ class BasePlanner {
   double interpolation_dist_;
   int state_dimensions_;
   bool solution_found_;
+  bool planning_finished_;
 };
 }  // namespace psrr_planner

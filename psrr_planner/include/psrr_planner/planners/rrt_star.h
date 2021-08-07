@@ -112,7 +112,6 @@ class RRTStar : public BasePlanner {
   double r_rrt_;
   double max_distance_;
   double goal_radius_;
-  bool stopped_;
 };
 
 }  // namespace psrr_planner

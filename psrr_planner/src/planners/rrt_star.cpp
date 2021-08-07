@@ -43,7 +43,7 @@ RRTStar::RRTStar(const StateLimits& state_limits,
 RRTStar::~RRTStar(){};
 
 void RRTStar::init(const Vertex& start, const Vertex& goal) {
-  stopped_ = false;
+  planning_finished_ = false;
   solution_found_ = false;
 
   start_vertex_ = std::make_shared<Vertex>();
@@ -111,7 +111,7 @@ double RRTStar::cost(std::shared_ptr<Vertex> v) {
 }
 
 void RRTStar::update() {
-  if (stopped_) return;
+  if (planning_finished_) return;
 
   std::shared_ptr<Vertex> x_rand = std::make_shared<Vertex>();
   std::shared_ptr<Vertex> x_nearest = std::make_shared<Vertex>();
@@ -149,6 +149,7 @@ void RRTStar::update() {
       }
     }
     x_new->parent = x_min;
+    edges_.emplace_back(x_new->parent, x_new);
 
     // rewiring
     for (const auto& x_near : X_near) {
@@ -187,12 +188,13 @@ void RRTStar::update() {
         }
       }
       goal_vertex_->parent = bestVertex;
+      solution_found_ = true;
     }
   }
 
   if (vertices_.size() > max_vertices_ - 1) {
     std::cout << "Vertices reach maximum limit. Algorithm stopped." << '\n';
-    stopped_ = true;
+    planning_finished_ = true;
   }
 }
 

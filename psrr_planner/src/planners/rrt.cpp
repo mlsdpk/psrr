@@ -39,7 +39,7 @@ RRT::RRT(const StateLimits& state_limits,
 RRT::~RRT(){};
 
 void RRT::init(const Vertex& start, const Vertex& goal) {
-  stopped_ = false;
+  planning_finished_ = false;
   solution_found_ = false;
 
   start_vertex_ = std::make_shared<Vertex>();
@@ -82,7 +82,7 @@ void RRT::nearest(const std::shared_ptr<const Vertex>& x_rand,
 }
 
 void RRT::update() {
-  if (stopped_) return;
+  if (planning_finished_) return;
 
   std::shared_ptr<Vertex> x_rand = std::make_shared<Vertex>();
   std::shared_ptr<Vertex> x_nearest = std::make_shared<Vertex>();
@@ -111,14 +111,14 @@ void RRT::update() {
 
     if (goal_dist < goal_radius_) {
       goal_vertex_->parent = x_new;
-      stopped_ = true;
+      planning_finished_ = true;
       solution_found_ = true;
     }
   }
 
   if (vertices_.size() > max_vertices_ - 1) {
     std::cout << "Vertices reach maximum limit. Algorithm stopped." << '\n';
-    stopped_ = true;
+    planning_finished_ = true;
   }
 }
 

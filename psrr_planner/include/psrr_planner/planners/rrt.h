@@ -105,11 +105,6 @@ class RRT : public BasePlanner {
    * @brief Distance between vertex and goal to stop planning
    */
   double goal_radius_;
-
-  /**
-   * @brief Flag to know whether algorithm is stopped or not
-   */
-  bool stopped_;
 };
 
 }  // namespace psrr_planner
