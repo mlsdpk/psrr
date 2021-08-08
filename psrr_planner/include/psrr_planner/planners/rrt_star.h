@@ -29,8 +29,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <psrr_planner/planners/base_planner.h>
 #include <psrr_planner/utilities.h>
 
-#include <random>
-
 namespace psrr_planner {
 
 class RRTStar : public BasePlanner {
@@ -39,7 +37,7 @@ class RRTStar : public BasePlanner {
    * @brief A constructor for psrr_planner::RRT
    * @param state_limits The state space of the robot including limits
    * @param collision_checker Grid Collision Checker
-   * @param max_vertices Maximum number of vertices in a tree
+   * @param max_iterations Maximum number of iterations to run the algorithm
    * @param goal_parent_size_interval Only find parent of goal vertex for fix
    * amount of vertices interval
    * @param max_distance Maximum distance allowed between two vertices
@@ -48,13 +46,14 @@ class RRTStar : public BasePlanner {
    * @param goal_radius Distance between vertex and goal to stop planning
    * @param use_seed Either use seeding or not (default: false)
    * @param seed_number Seed number to be used if use_seed is true. (default: 0)
+   * @param print_every Print solution info at every n iteration (default: 0)
    */
   RRTStar(const StateLimits& state_limits,
           std::shared_ptr<GridCollisionChecker> collision_checker,
-          unsigned int max_vertices, unsigned int goal_parent_size_interval,
+          unsigned int max_iterations, unsigned int goal_parent_size_interval,
           double max_distance, double r_rrt, double interpolation_dist,
           double goal_radius, bool use_seed = false,
-          unsigned int seed_number = 0);
+          unsigned int seed_number = 0, unsigned int print_every = 0);
 
   /**
    * @brief A destructor for psrr_planner::RRT
@@ -107,7 +106,21 @@ class RRTStar : public BasePlanner {
 
   double cost(std::shared_ptr<Vertex> v);
 
-  unsigned int max_vertices_;
+  /**
+   * @brief Maximum number of iterations to run the algorithm
+   */
+  unsigned int max_iterations_;
+
+  /**
+   * @brief Iteration number to keep track
+   */
+  unsigned int iteration_number_;
+
+  /**
+   * @brief Print solution info at every n iteration
+   */
+  unsigned int print_every_;
+
   unsigned int goal_parent_size_interval_;
   double r_rrt_;
   double max_distance_;
