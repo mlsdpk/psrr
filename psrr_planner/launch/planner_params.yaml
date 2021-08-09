@@ -31,14 +31,14 @@ initial_joint_pos: [0.6, 0.6]
 
 ## BELOW ARE PLANNER SPECIFIC VARIABLES ##
 
-planner_type: rrt_star
+planner_type: informed_rrt_star
 
 #################
 ## RRT related ##
 #################
 rrt:
-  # maximum number of vertices in a tree
-  max_vertices: 20000
+  # maximum number of iterations to run the algorithm
+  max_iterations: 20000
 
   # maximum distance allowed between two vertices
   delta_q: 0.8
@@ -62,29 +62,69 @@ rrt:
 ## RRT* related ##
 ##################
 rrt_star:
-  # maximum number of vertices in a tree
-  max_vertices: 10000
+  # maximum number of iterations to run the algorithm
+  max_iterations: 100000
 
   # Only find parent of goal vertex for fix amount of vertices interval
   goal_parent_size_interval: 500
 
   # maximum distance allowed between two vertices
-  max_distance: 1.5
+  max_distance: 0.8
 
   # Rewiring factor
-  r_rrt: 3.1
+  r_rrt: 4.1
 
   # interpolation distance during collsion checking
   interpolation_dist: 0.01
 
   # distance between vertex and goal to stop planning
-  goal_radius: 1.5
+  goal_radius: 1.8
 
   # Either use seeding or not
-  use_seed: false
+  use_seed: true
 
   # if use_seed is true, planner will use 
   # consistent random samples during sampling process
   # with this provided seed number (default: 0)
   seed_number: 0 # optional
+
+  # print solution info at every nth iteration number
+  print_every: 1000
+#################
+
+###########################
+## Informed RRT* related ##
+###########################
+informed_rrt_star:
+  # maximum number of iterations to run the algorithm
+  max_iterations: 100000
+
+  # Maximum number of tries to sample on prolate hyperellipsoid
+  max_sampling_tries: 1000
+
+  # maximum distance allowed between two vertices
+  max_distance: 0.8
+
+  # Rewiring factor
+  rewire_factor: 4.1
+
+  # interpolation distance during collsion checking
+  interpolation_dist: 0.01
+
+  # distance between vertex and goal to stop planning
+  goal_radius: 1.8
+
+  # update goal parent at every nth iteration number
+  update_goal_every: 1000
+
+  # Either use seeding or not
+  use_seed: true
+
+  # if use_seed is true, planner will use 
+  # consistent random samples during sampling process
+  # with this provided seed number (default: 0)
+  seed_number: 0 # optional
+
+  # print solution info at every nth iteration number
+  print_every: 1000
 #################

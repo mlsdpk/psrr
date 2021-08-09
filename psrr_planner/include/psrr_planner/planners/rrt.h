@@ -29,8 +29,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <psrr_planner/planners/base_planner.h>
 #include <psrr_planner/utilities.h>
 
-#include <random>
-
 namespace psrr_planner {
 
 class RRT : public BasePlanner {
@@ -39,7 +37,7 @@ class RRT : public BasePlanner {
    * @brief A constructor for psrr_planner::RRT
    * @param state_limits The state space of the robot including limits
    * @param collision_checker Grid Collision Checker
-   * @param max_vertices Maximum number of vertices in a tree
+   * @param max_iterations Maximum number of iterations to run the algorithm
    * @param delta_q Maximum distance allowed between two vertices
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
@@ -48,7 +46,7 @@ class RRT : public BasePlanner {
    */
   RRT(const StateLimits& state_limits,
       std::shared_ptr<GridCollisionChecker> collision_checker,
-      unsigned int max_vertices, double delta_q, double interpolation_dist,
+      unsigned int max_iterations, double delta_q, double interpolation_dist,
       double goal_radius, bool use_seed = false, unsigned int seed_number = 0);
 
   /**
@@ -92,9 +90,14 @@ class RRT : public BasePlanner {
                std::shared_ptr<Vertex>& x_near);
 
   /**
-   * @brief Maximum number of vertices in a tree
+   * @brief Maximum number of iterations to run the algorithm
    */
-  unsigned int max_vertices_;
+  unsigned int max_iterations_;
+
+  /**
+   * @brief Iteration number to keep track
+   */
+  unsigned int iteration_number_;
 
   /**
    * @brief Maximum distance allowed between two vertices

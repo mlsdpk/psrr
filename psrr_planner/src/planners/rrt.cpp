@@ -28,11 +28,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace psrr_planner {
 RRT::RRT(const StateLimits& state_limits,
          std::shared_ptr<GridCollisionChecker> collision_checker,
-         unsigned int max_vertices, double delta_q, double interpolation_dist,
+         unsigned int max_iterations, double delta_q, double interpolation_dist,
          double goal_radius, bool use_seed, unsigned int seed_number)
     : BasePlanner(state_limits, collision_checker, interpolation_dist, use_seed,
                   seed_number),
-      max_vertices_{max_vertices},
+      max_iterations_{max_iterations},
       delta_q_{delta_q},
       goal_radius_{goal_radius} {}
 
@@ -41,6 +41,7 @@ RRT::~RRT(){};
 void RRT::init(const Vertex& start, const Vertex& goal) {
   planning_finished_ = false;
   solution_found_ = false;
+  iteration_number_ = 1;
 
   start_vertex_ = std::make_shared<Vertex>();
   goal_vertex_ = std::make_shared<Vertex>();
@@ -84,41 +85,44 @@ void RRT::nearest(const std::shared_ptr<const Vertex>& x_rand,
 void RRT::update() {
   if (planning_finished_) return;
 
-  std::shared_ptr<Vertex> x_rand = std::make_shared<Vertex>();
-  std::shared_ptr<Vertex> x_nearest = std::make_shared<Vertex>();
-  std::shared_ptr<Vertex> x_new = std::make_shared<Vertex>();
+  if (iteration_number_ <= max_iterations_) {
+    std::shared_ptr<Vertex> x_rand = std::make_shared<Vertex>();
+    std::shared_ptr<Vertex> x_nearest = std::make_shared<Vertex>();
+    std::shared_ptr<Vertex> x_new = std::make_shared<Vertex>();
 
-  sampleFree(x_rand);
-  nearest(x_rand, x_nearest);
+    sampleFree(x_rand);
+    nearest(x_rand, x_nearest);
 
-  // find the distance between x_rand and x_nearest
-  double d = distance(x_rand, x_nearest);
+    // find the distance between x_rand and x_nearest
+    double d = distance(x_rand, x_nearest);
 
-  // if this distance d > delta_q, we need to find nearest state in the
-  // direction of x_rand
-  if (d > delta_q_) {
-    interpolate(x_nearest, x_rand, delta_q_ / d, x_new);
-  } else {
-    x_new->state = x_rand->state;
-  }
-
-  if (!isCollision(x_nearest, x_new)) {
-    x_new->parent = x_nearest;
-    vertices_.emplace_back(x_new);
-    edges_.emplace_back(x_nearest, x_new);
-
-    double goal_dist = distance(x_new, goal_vertex_);
-
-    if (goal_dist < goal_radius_) {
-      goal_vertex_->parent = x_new;
-      planning_finished_ = true;
-      solution_found_ = true;
+    // if this distance d > delta_q, we need to find nearest state in the
+    // direction of x_rand
+    if (d > delta_q_) {
+      interpolate(x_nearest, x_rand, delta_q_ / d, x_new);
+    } else {
+      x_new->state = x_rand->state;
     }
-  }
 
-  if (vertices_.size() > max_vertices_ - 1) {
-    std::cout << "Vertices reach maximum limit. Algorithm stopped." << '\n';
+    if (!isCollision(x_nearest, x_new)) {
+      x_new->parent = x_nearest;
+      vertices_.emplace_back(x_new);
+      edges_.emplace_back(x_nearest, x_new);
+
+      double goal_dist = distance(x_new, goal_vertex_);
+
+      if (goal_dist < goal_radius_) {
+        goal_vertex_->parent = x_new;
+        planning_finished_ = true;
+        solution_found_ = true;
+      }
+    }
+
+    iteration_number_++;
+  } else {
     planning_finished_ = true;
+    std::cout << "Iterations number reach max limit. Algorithm stopped."
+              << '\n';
   }
 }
 

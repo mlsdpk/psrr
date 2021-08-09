@@ -34,6 +34,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <psrr_msgs/FootPrint.h>
 #include <psrr_msgs/Path.h>
 #include <psrr_planner/collision_checker.h>
+#include <psrr_planner/planners/informed_rrt_star.h>
 #include <psrr_planner/planners/rrt.h>
 #include <psrr_planner/planners/rrt_star.h>
 #include <ros/ros.h>
@@ -202,14 +203,14 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       if (planner_type == "rrt") {
         ROS_INFO("Planner Type: rrt");
         // we need to check planner specific parameters are given
-        if (private_nh_.hasParam("rrt/max_vertices") &&
+        if (private_nh_.hasParam("rrt/max_iterations") &&
             private_nh_.hasParam("rrt/delta_q") &&
             private_nh_.hasParam("rrt/interpolation_dist") &&
             private_nh_.hasParam("rrt/goal_radius")) {
-          int max_vertices;
+          int max_iterations;
           double delta_q, interpolation_dist, goal_radius;
-          private_nh_.param<int>("rrt/max_vertices", max_vertices,
-                                 max_vertices);
+          private_nh_.param<int>("rrt/max_iterations", max_iterations,
+                                 max_iterations);
           private_nh_.param<double>("rrt/delta_q", delta_q, delta_q);
           private_nh_.param<double>("rrt/interpolation_dist",
                                     interpolation_dist, interpolation_dist);
@@ -239,9 +240,9 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           }
 
           // create rrt planner
-          planner_.reset(new RRT(state_limits, collision_checker_, max_vertices,
-                                 delta_q, interpolation_dist, goal_radius,
-                                 use_seed, seed_number));
+          planner_.reset(new RRT(state_limits, collision_checker_,
+                                 max_iterations, delta_q, interpolation_dist,
+                                 goal_radius, use_seed, seed_number));
         } else {
           ROS_ERROR("RRT specific parameters not found.");
           return;
@@ -250,18 +251,17 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       // RRT*
       else if (planner_type == "rrt_star") {
         ROS_INFO("Planner Type: rrt_star");
-        // TODO: Add rrt*
         // we need to check planner specific parameters are given
-        if (private_nh_.hasParam("rrt_star/max_vertices") &&
+        if (private_nh_.hasParam("rrt_star/max_iterations") &&
             private_nh_.hasParam("rrt_star/goal_parent_size_interval") &&
             private_nh_.hasParam("rrt_star/max_distance") &&
             private_nh_.hasParam("rrt_star/r_rrt") &&
             private_nh_.hasParam("rrt_star/interpolation_dist") &&
             private_nh_.hasParam("rrt_star/goal_radius")) {
-          int max_vertices, goal_parent_size_interval;
+          int max_iterations, goal_parent_size_interval;
           double max_distance, r_rrt, interpolation_dist, goal_radius;
-          private_nh_.param<int>("rrt_star/max_vertices", max_vertices,
-                                 max_vertices);
+          private_nh_.param<int>("rrt_star/max_iterations", max_iterations,
+                                 max_iterations);
           private_nh_.param<int>("rrt_star/goal_parent_size_interval",
                                  goal_parent_size_interval,
                                  goal_parent_size_interval);
@@ -296,13 +296,87 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                 "seeding...");
           }
 
+          int print_every = 0;
+          private_nh_.param<int>("rrt_star/print_every", print_every,
+                                 print_every);
+
           // create rrt-star planner
           planner_.reset(new RRTStar(state_limits, collision_checker_,
-                                     max_vertices, goal_parent_size_interval,
+                                     max_iterations, goal_parent_size_interval,
                                      max_distance, r_rrt, interpolation_dist,
-                                     goal_radius, use_seed, seed_number));
+                                     goal_radius, use_seed, seed_number,
+                                     print_every));
         } else {
           ROS_ERROR("RRT specific parameters not found.");
+          return;
+        }
+      } else if (planner_type == "informed_rrt_star") {
+        ROS_INFO("Planner Type: informed_rrt_star");
+
+        // TODO: add informed_rrt_star stuffs here
+        // we need to check planner specific parameters are given
+        if (private_nh_.hasParam("informed_rrt_star/max_iterations") &&
+            private_nh_.hasParam("informed_rrt_star/max_sampling_tries") &&
+            private_nh_.hasParam("informed_rrt_star/max_distance") &&
+            private_nh_.hasParam("informed_rrt_star/rewire_factor") &&
+            private_nh_.hasParam("informed_rrt_star/interpolation_dist") &&
+            private_nh_.hasParam("informed_rrt_star/goal_radius") &&
+            private_nh_.hasParam("informed_rrt_star/update_goal_every")) {
+          int max_iterations, max_sampling_tries, update_goal_every;
+          double max_distance, rewire_factor, interpolation_dist, goal_radius;
+          private_nh_.param<int>("informed_rrt_star/max_iterations",
+                                 max_iterations, max_iterations);
+          private_nh_.param<int>("informed_rrt_star/max_sampling_tries",
+                                 max_sampling_tries, max_sampling_tries);
+          private_nh_.param<double>("informed_rrt_star/max_distance",
+                                    max_distance, max_distance);
+          private_nh_.param<double>("informed_rrt_star/rewire_factor",
+                                    rewire_factor, rewire_factor);
+          private_nh_.param<double>("informed_rrt_star/interpolation_dist",
+                                    interpolation_dist, interpolation_dist);
+          private_nh_.param<double>("informed_rrt_star/goal_radius",
+                                    goal_radius, goal_radius);
+          private_nh_.param<int>("informed_rrt_star/update_goal_every",
+                                 update_goal_every, update_goal_every);
+
+          // now check seeding is used or not
+          // TODO: seeding parameter is used in all the planners. It is better
+          // to put it outside independent of the specific planner.
+          bool use_seed = false;
+          int seed_number = 0;
+
+          if (private_nh_.hasParam("informed_rrt_star/use_seed")) {
+            private_nh_.param<bool>("informed_rrt_star/use_seed", use_seed,
+                                    use_seed);
+            if (use_seed) {
+              if (private_nh_.hasParam("informed_rrt_star/seed_number")) {
+                private_nh_.param<int>("informed_rrt_star/seed_number",
+                                       seed_number, seed_number);
+                ROS_INFO("Random seed %d provided.", seed_number);
+              } else {
+                ROS_INFO("Default Random seed 0 is used.");
+              }
+            } else {
+              ROS_INFO("Random seeding is used.");
+            }
+          } else {
+            ROS_WARN(
+                "Informed RRT* use_seed parameter not found. Using random "
+                "seeding...");
+          }
+
+          int print_every = 0;
+          private_nh_.param<int>("informed_rrt_star/print_every", print_every,
+                                 print_every);
+
+          // create rrt-star planner
+          planner_.reset(new InformedRRTStar(
+              state_limits, collision_checker_, max_iterations,
+              max_sampling_tries, max_distance, rewire_factor,
+              interpolation_dist, goal_radius, update_goal_every, use_seed,
+              seed_number, print_every));
+        } else {
+          ROS_ERROR("Informed RRT* specific parameters not found.");
           return;
         }
       } else {
@@ -534,7 +608,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
 
       std::shared_ptr<Vertex> start_vertex = planner_->getStartVertex();
       std::shared_ptr<Vertex> current = planner_->getGoalVertex();
-      while (current->parent && current != start_vertex) {
+      while (current->parent || current == start_vertex) {
         geometry_msgs::Pose path_pose;
         geometry_msgs::PoseStamped path_pose_stamped;
         sensor_msgs::JointState joint_state;
@@ -599,6 +673,9 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         path.joint_state.push_back(joint_state);
         path_2d.poses.push_back(path_pose_stamped);
 
+        if (current == start_vertex) {
+          break;
+        }
         current = current->parent;
       }
 
