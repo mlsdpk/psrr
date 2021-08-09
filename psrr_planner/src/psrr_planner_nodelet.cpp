@@ -34,6 +34,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <psrr_msgs/FootPrint.h>
 #include <psrr_msgs/Path.h>
 #include <psrr_planner/collision_checker.h>
+#include <psrr_planner/planners/informed_rrt_star.h>
 #include <psrr_planner/planners/rrt.h>
 #include <psrr_planner/planners/rrt_star.h>
 #include <ros/ros.h>
@@ -310,6 +311,10 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           ROS_ERROR("RRT specific parameters not found.");
           return;
         }
+      } else if (planner_type == "informed_rrt_star") {
+        ROS_INFO("Planner Type: informed_rrt_star");
+
+        // TODO: add informed_rrt_star stuffs here
       } else {
         ROS_ERROR("Invalid planner type.");
         return;

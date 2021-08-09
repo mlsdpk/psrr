@@ -27,6 +27,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <std_msgs/ColorRGBA.h>
 
+#include <boost/math/constants/constants.hpp>
+#include <cmath>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -56,5 +58,80 @@ struct Vertex {
   State state;
   std::shared_ptr<Vertex> parent{nullptr};
 };
+
+/**
+ * @brief The Lebesgue measure (i.e., "volume") of an n-dimensional ball with a
+ * unit radius.
+ * Ref: https://ompl.kavrakilab.org/GeometricEquations_8cpp_source.html
+ */
+static double unitNBallMeasure(unsigned int n) {
+  // This is the radius version with r removed (as it is 1) for efficiency
+  return std::pow(std::sqrt(boost::math::constants::pi<double>()),
+                  static_cast<double>(n)) /
+         std::tgamma(static_cast<double>(n) / 2.0 + 1.0);
+}
+
+/**
+ * @brief The Lebesgue measure (i.e., "volume") of an n-dimensional prolate
+ * hyperspheroid (a symmetric hyperellipse).
+ * Ref: https://ompl.kavrakilab.org/GeometricEquations_8cpp_source.html
+ * @param n number of dimensions
+ * @param d_foci distance between two focii
+ * @param d_transverse transverse diameter
+ */
+static double prolateHyperspheroidMeasure(unsigned int n, double d_foci,
+                                          double d_transverse) {
+  // Sanity check input
+  if (d_transverse < d_foci) {
+    throw(
+        "Transverse diameter cannot be less than the minimum transverse "
+        "diameter.");
+  }
+
+  // Variable
+  // The conjugate diameter:
+  double conjugate_diameter;
+  // The Lebesgue measure return value
+  double lmeas;
+
+  // Calculate the conjugate diameter:
+  conjugate_diameter = std::sqrt(d_transverse * d_transverse - d_foci * d_foci);
+
+  // Calculate the volume
+  // First multiply together the radii, noting that the first radius is the
+  // transverse diameter/2.0, and the other N-1 are the conjugate diameter/2.0
+  lmeas = d_transverse / 2.0;
+  for (unsigned int i = 1u; i < n; ++i) {
+    lmeas = lmeas * conjugate_diameter / 2.0;
+  }
+
+  // Then multiply by the volume of the unit n-ball.
+  lmeas = lmeas * unitNBallMeasure(n);
+
+  // Finally return:
+  return lmeas;
+}
+
+/**
+ * @brief Calculate the measure (i.e., "n-dimensional volume") of a problem with
+ * R^n and SO(2) state spaces
+ */
+static double problemMeasure(const StateLimits& state_limits) {
+  double measure = 1.0;
+
+  // real vector components first
+  // x and y
+  measure *= (state_limits.max_x - state_limits.min_x) *
+             (state_limits.max_y - state_limits.min_y);
+  // joints
+  for (std::size_t i = 0; i < state_limits.min_joint_pos.size(); ++i) {
+    measure *= state_limits.max_joint_pos[i] - state_limits.min_joint_pos[i];
+  }
+
+  // SO(2)
+  measure *= 2.0 * M_PI;
+
+  return measure;
+}
 
 }  // namespace psrr_planner
