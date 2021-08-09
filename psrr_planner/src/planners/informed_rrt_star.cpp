@@ -29,17 +29,18 @@ namespace psrr_planner {
 InformedRRTStar::InformedRRTStar(
     const StateLimits& state_limits,
     std::shared_ptr<GridCollisionChecker> collision_checker,
-    unsigned int max_iterations, unsigned int goal_parent_size_interval,
+    unsigned int max_iterations, unsigned int max_sampling_tries,
     double max_distance, double rewire_factor, double interpolation_dist,
-    double goal_radius, bool use_seed, unsigned int seed_number,
-    unsigned int print_every)
+    double goal_radius, unsigned int update_goal_every, bool use_seed,
+    unsigned int seed_number, unsigned int print_every)
     : BasePlanner(state_limits, collision_checker, interpolation_dist, use_seed,
                   seed_number),
       max_iterations_{max_iterations},
-      goal_parent_size_interval_{goal_parent_size_interval},
+      max_sampling_tries_{max_sampling_tries},
       max_distance_{max_distance},
       rewire_factor_{rewire_factor},
       goal_radius_{goal_radius},
+      update_goal_every_{update_goal_every},
       print_every_{print_every} {}
 
 InformedRRTStar::~InformedRRTStar(){};
@@ -55,12 +56,10 @@ void InformedRRTStar::init(const Vertex& start, const Vertex& goal) {
   goal_vertex_->state = goal.state;
 
   // first find the number of informed dimensions
-  // we use [x,y + len(joints)] as no: of dimensions for informed states and
-  // [informed_dims_ + SO(2)] for total state dimensions
+  // we use [x,y + len(joints)] as no: of dimensions for informed states
   // TODO: here we assume start and goal has same informed dims
   // although we need to have sanity check here just in case
   informed_dims_ = 2 + start_vertex_->state.joint_pos.size();
-  state_dims_ = informed_dims_ + 1;
 
   // create two focii with only informed state spaces
   convertVertexToVectorXd(start_vertex_, x_start_focus_);
@@ -68,7 +67,11 @@ void InformedRRTStar::init(const Vertex& start, const Vertex& goal) {
 
   c_i_ = std::numeric_limits<double>::infinity();
   c_min_ = (x_start_focus_ - x_goal_focus_).norm();
-  x_center_ = 0.5 * (x_start_focus_ - x_goal_focus_);
+  x_center_ = 0.5 * (x_start_focus_ + x_goal_focus_);
+  std::cout << "x_center x: " << x_center_[0] << std::endl;
+  std::cout << "x_center y: " << x_center_[1] << std::endl;
+  std::cout << "x_center j1: " << x_center_[2] << std::endl;
+  std::cout << "x_center j2: " << x_center_[3] << std::endl;
   updateRotationMatrix();
 
   // initially no solution is found yet
@@ -185,10 +188,11 @@ void InformedRRTStar::sample(const std::shared_ptr<Vertex>& v) {
   }
   // sample on the hyperellipsoid
   if (c_i_ < std::numeric_limits<double>::infinity()) {
-    unsigned int i = 0;
+    unsigned int iter = 0;
     bool found_informed_sample = false;
-    while (i < max_sampling_tries_) {
-      i++;
+    while (iter < max_sampling_tries_) {
+      iter++;
+
       // The spherical point as a std::vector
       std::vector<double> sphere(informed_dims_);
 
@@ -241,7 +245,9 @@ void InformedRRTStar::sample(const std::shared_ptr<Vertex>& v) {
 
     // if informed sample is not found with maximum number of tries
     // we just sample on the whole problem space, otherwise return
-    if (found_informed_sample) return;
+    if (found_informed_sample) {
+      return;
+    }
   }
 
   // sample problem with state limits
@@ -285,10 +291,11 @@ void InformedRRTStar::near(const std::shared_ptr<const Vertex>& x_new,
 
 void InformedRRTStar::updateRewiringLowerBounds() {
   // r_rrt > (2*(1+1/d))^(1/d)*(measure/ballvolume)^(1/d)
-  r_rrt_ = rewire_factor_ *
-           std::pow(2 * (1.0 + 1.0 / static_cast<double>(state_dims_)) *
-                        (current_measure_ / unitNBallMeasure(state_dims_)),
-                    1.0 / static_cast<double>(state_dims_));
+  r_rrt_ =
+      rewire_factor_ *
+      std::pow(2 * (1.0 + 1.0 / static_cast<double>(state_dimensions_)) *
+                   (current_measure_ / unitNBallMeasure(state_dimensions_)),
+               1.0 / static_cast<double>(state_dimensions_));
 }
 
 double InformedRRTStar::cost(std::shared_ptr<Vertex> v) {
@@ -329,7 +336,10 @@ double InformedRRTStar::euclideanDistance(
   return total_dist;
 }
 
-bool inGoalRegion(const std::shared_ptr<const Vertex>& v) { return true; }
+bool InformedRRTStar::inGoalRegion(const std::shared_ptr<const Vertex>& v) {
+  if (distance(v, goal_vertex_) <= goal_radius_) return true;
+  return false;
+}
 
 void InformedRRTStar::update() {
   if (planning_finished_) return;
@@ -338,17 +348,20 @@ void InformedRRTStar::update() {
     // find the current best solution cost and parent vertex
     std::shared_ptr<Vertex> best_vertex;
     double min_cost = std::numeric_limits<double>::infinity();
-    for (const auto& v : x_soln_) {
-      double c = euclideanCost(v);
-      if (c < min_cost) {
-        min_cost = c;
-        best_vertex = v;
+
+    if (x_soln_.size() > 0) {
+      for (const auto& v : x_soln_) {
+        double c = euclideanCost(v);
+        if (c < min_cost) {
+          min_cost = c;
+          best_vertex = v;
+        }
       }
+      min_cost += euclideanDistance(best_vertex, goal_vertex_);
     }
 
     if (min_cost < c_i_) {
       c_i_ = min_cost;
-      goal_vertex_->parent = best_vertex;
 
       // Update the new measure:
       // make sure we include SO(2) component
@@ -412,6 +425,24 @@ void InformedRRTStar::update() {
       // add into x_soln if the vertex is within the goal radius
       if (inGoalRegion(x_new)) {
         x_soln_.emplace_back(x_new);
+      }
+    }
+
+    // update the best parent for the goal vertex every n iterations
+    if (iteration_number_ % update_goal_every_ == 0) {
+      if (x_soln_.size() > 0) {
+        std::shared_ptr<Vertex> best_goal_parent;
+        double min_goal_parent_cost = std::numeric_limits<double>::infinity();
+
+        for (const auto& v : x_soln_) {
+          double c = cost(v);
+          if (c < min_goal_parent_cost) {
+            min_goal_parent_cost = c;
+            best_goal_parent = v;
+          }
+        }
+        goal_vertex_->parent = best_goal_parent;
+        solution_found_ = true;
       }
     }
 

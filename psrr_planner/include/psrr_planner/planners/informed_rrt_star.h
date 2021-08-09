@@ -44,23 +44,24 @@ class InformedRRTStar : public BasePlanner {
    * @param state_limits The state space of the robot including limits
    * @param collision_checker Grid Collision Checker
    * @param max_iterations Maximum number of iterations to run the algorithm
-   * @param goal_parent_size_interval Only find parent of goal vertex for fix
-   * amount of vertices interval
+   * @param max_sampling_tries Maximum number of tries to sample on prolate
+   * hyperellipsoid
    * @param max_distance Maximum distance allowed between two vertices
-   * @param r_rrt Rewiring factor
+   * @param rewire_factor Rewiring factor
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
+   * @param update_goal_every Find best goal parent at every n iteration
    * @param use_seed Either use seeding or not (default: false)
    * @param seed_number Seed number to be used if use_seed is true. (default: 0)
    * @param print_every Print solution info at every n iteration (default: 0)
    */
   InformedRRTStar(const StateLimits& state_limits,
                   std::shared_ptr<GridCollisionChecker> collision_checker,
-                  unsigned int max_iterations,
-                  unsigned int goal_parent_size_interval, double max_distance,
-                  double r_rrt, double interpolation_dist, double goal_radius,
-                  bool use_seed = false, unsigned int seed_number = 0,
-                  unsigned int print_every = 0);
+                  unsigned int max_iterations, unsigned int max_sampling_tries,
+                  double max_distance, double rewire_factor,
+                  double interpolation_dist, double goal_radius,
+                  unsigned int update_goal_every, bool use_seed = false,
+                  unsigned int seed_number = 0, unsigned int print_every = 0);
 
   /**
    * @brief A destructor for psrr_planner::RRT
@@ -190,14 +191,13 @@ class InformedRRTStar : public BasePlanner {
    */
   unsigned int print_every_;
 
-  unsigned int goal_parent_size_interval_;
   double r_rrt_;
   double rewire_factor_;
   double max_distance_;
   double goal_radius_;
+  unsigned int update_goal_every_;
   std::vector<std::shared_ptr<Vertex>> x_soln_;
 
-  unsigned int state_dims_;
   unsigned int informed_dims_;
   unsigned int max_sampling_tries_;
 

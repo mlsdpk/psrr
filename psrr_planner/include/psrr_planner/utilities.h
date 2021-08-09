@@ -83,6 +83,7 @@ static double prolateHyperspheroidMeasure(unsigned int n, double d_foci,
                                           double d_transverse) {
   // Sanity check input
   if (d_transverse < d_foci) {
+    std::cout << "this" << std::endl;
     throw(
         "Transverse diameter cannot be less than the minimum transverse "
         "diameter.");

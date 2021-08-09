@@ -251,7 +251,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       // RRT*
       else if (planner_type == "rrt_star") {
         ROS_INFO("Planner Type: rrt_star");
-        // TODO: Add rrt*
         // we need to check planner specific parameters are given
         if (private_nh_.hasParam("rrt_star/max_iterations") &&
             private_nh_.hasParam("rrt_star/goal_parent_size_interval") &&
@@ -315,6 +314,71 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         ROS_INFO("Planner Type: informed_rrt_star");
 
         // TODO: add informed_rrt_star stuffs here
+        // we need to check planner specific parameters are given
+        if (private_nh_.hasParam("informed_rrt_star/max_iterations") &&
+            private_nh_.hasParam("informed_rrt_star/max_sampling_tries") &&
+            private_nh_.hasParam("informed_rrt_star/max_distance") &&
+            private_nh_.hasParam("informed_rrt_star/rewire_factor") &&
+            private_nh_.hasParam("informed_rrt_star/interpolation_dist") &&
+            private_nh_.hasParam("informed_rrt_star/goal_radius") &&
+            private_nh_.hasParam("informed_rrt_star/update_goal_every")) {
+          int max_iterations, max_sampling_tries, update_goal_every;
+          double max_distance, rewire_factor, interpolation_dist, goal_radius;
+          private_nh_.param<int>("informed_rrt_star/max_iterations",
+                                 max_iterations, max_iterations);
+          private_nh_.param<int>("informed_rrt_star/max_sampling_tries",
+                                 max_sampling_tries, max_sampling_tries);
+          private_nh_.param<double>("informed_rrt_star/max_distance",
+                                    max_distance, max_distance);
+          private_nh_.param<double>("informed_rrt_star/rewire_factor",
+                                    rewire_factor, rewire_factor);
+          private_nh_.param<double>("informed_rrt_star/interpolation_dist",
+                                    interpolation_dist, interpolation_dist);
+          private_nh_.param<double>("informed_rrt_star/goal_radius",
+                                    goal_radius, goal_radius);
+          private_nh_.param<int>("informed_rrt_star/update_goal_every",
+                                 update_goal_every, update_goal_every);
+
+          // now check seeding is used or not
+          // TODO: seeding parameter is used in all the planners. It is better
+          // to put it outside independent of the specific planner.
+          bool use_seed = false;
+          int seed_number = 0;
+
+          if (private_nh_.hasParam("informed_rrt_star/use_seed")) {
+            private_nh_.param<bool>("informed_rrt_star/use_seed", use_seed,
+                                    use_seed);
+            if (use_seed) {
+              if (private_nh_.hasParam("informed_rrt_star/seed_number")) {
+                private_nh_.param<int>("informed_rrt_star/seed_number",
+                                       seed_number, seed_number);
+                ROS_INFO("Random seed %d provided.", seed_number);
+              } else {
+                ROS_INFO("Default Random seed 0 is used.");
+              }
+            } else {
+              ROS_INFO("Random seeding is used.");
+            }
+          } else {
+            ROS_WARN(
+                "Informed RRT* use_seed parameter not found. Using random "
+                "seeding...");
+          }
+
+          int print_every = 0;
+          private_nh_.param<int>("informed_rrt_star/print_every", print_every,
+                                 print_every);
+
+          // create rrt-star planner
+          planner_.reset(new InformedRRTStar(
+              state_limits, collision_checker_, max_iterations,
+              max_sampling_tries, max_distance, rewire_factor,
+              interpolation_dist, goal_radius, update_goal_every, use_seed,
+              seed_number, print_every));
+        } else {
+          ROS_ERROR("Informed RRT* specific parameters not found.");
+          return;
+        }
       } else {
         ROS_ERROR("Invalid planner type.");
         return;
