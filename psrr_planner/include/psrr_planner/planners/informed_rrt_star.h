@@ -88,6 +88,34 @@ class InformedRRTStar : public BasePlanner {
    */
   double getSolutionCost() override;
 
+  /**
+   * @brief Getter for 2d ellipse transverse diameter
+   */
+  const double getTransverseDiameter() const noexcept {
+    return transverse_dia_2d_;
+  }
+
+  /**
+   * @brief Getter for 2d ellipse conjugate diameter
+   */
+  const double getConjugateDiameter() const noexcept {
+    return conjugate_dia_2d_;
+  }
+
+  /**
+   * @brief Getter for 2d ellipse orientation
+   */
+  const double getEllipseOrientation() const noexcept {
+    return ellipse_orien_2d_;
+  }
+
+  /**
+   * @brief Getter for 2d ellipse center point
+   */
+  const std::vector<double> getEllipseCenter() const noexcept {
+    return ellipse_center_2d_;
+  }
+
  private:
   /**
    * @brief Randomly sample a n-dimensional state limited by min and max of each
@@ -137,11 +165,23 @@ class InformedRRTStar : public BasePlanner {
   double euclideanCost(std::shared_ptr<Vertex> v);
 
   /**
+   * @brief The cost to come of a vertex considering only x and y state spaces
+   */
+  double euclideanCost2D(std::shared_ptr<Vertex> v);
+
+  /**
    * @brief The euclidean distance between two vertices (this function does not
    * use SO(n) components since they are not informed)
    */
   double euclideanDistance(const std::shared_ptr<const Vertex>& v1,
                            const std::shared_ptr<const Vertex>& v2);
+
+  /**
+   * @brief The 2D euclidean distance between two vertices (this function only
+   * uses x and y state spaces)
+   */
+  double euclideanDistance2D(const std::shared_ptr<const Vertex>& v1,
+                             const std::shared_ptr<const Vertex>& v2);
 
   /**
    * @brief Convert vertex object into eigen vector. SO(2) component of
@@ -151,6 +191,8 @@ class InformedRRTStar : public BasePlanner {
    */
   void convertVertexToVectorXd(const std::shared_ptr<const Vertex>& v,
                                Eigen::VectorXd& vec);
+
+  void updateConjugateDiameter2D();
 
   /**
    * @brief Calculate a rotation matrix from hyperellipsoid frame to world frame
@@ -208,8 +250,14 @@ class InformedRRTStar : public BasePlanner {
   double c_min_;  // theoritical minimum cost between two focii (minimum
                   // transverse diameter)
 
-  double current_measure_;
+  // 2d ellipse properties
+  double transverse_dia_2d_;               // transverse diameter
+  double conjugate_dia_2d_;                // conjugate diameter
+  double d_focii_2d_;                      // distance between two focii
+  double ellipse_orien_2d_;                // orientation of the ellipse
+  std::vector<double> ellipse_center_2d_;  // center point of the ellipse
 
+  double current_measure_;
   Eigen::MatrixXd rotation_world_from_ellipse_;
   Eigen::MatrixXd transformation_world_from_ellipse_;
 

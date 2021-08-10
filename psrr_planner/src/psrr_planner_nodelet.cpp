@@ -195,12 +195,11 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           planner_costmap_ros_->getCostmap(), footprint_client_));
     }
 
-    std::string planner_type;
     if (private_nh_.hasParam("planner_type")) {
-      private_nh_.param<std::string>("planner_type", planner_type,
-                                     planner_type);
+      private_nh_.param<std::string>("planner_type", planner_type_,
+                                     planner_type_);
       // RRT
-      if (planner_type == "rrt") {
+      if (planner_type_ == "rrt") {
         ROS_INFO("Planner Type: rrt");
         // we need to check planner specific parameters are given
         if (private_nh_.hasParam("rrt/max_iterations") &&
@@ -249,7 +248,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         }
       }
       // RRT*
-      else if (planner_type == "rrt_star") {
+      else if (planner_type_ == "rrt_star") {
         ROS_INFO("Planner Type: rrt_star");
         // we need to check planner specific parameters are given
         if (private_nh_.hasParam("rrt_star/max_iterations") &&
@@ -310,7 +309,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           ROS_ERROR("RRT specific parameters not found.");
           return;
         }
-      } else if (planner_type == "informed_rrt_star") {
+      } else if (planner_type_ == "informed_rrt_star") {
         ROS_INFO("Planner Type: informed_rrt_star");
 
         // TODO: add informed_rrt_star stuffs here
@@ -384,7 +383,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         return;
       }
     } else {
-      ROS_ERROR("No planner type found. Make sure planner_type is set.");
+      ROS_ERROR("No planner type found. Make sure planner_type_ is set.");
       return;
     }
 
@@ -473,7 +472,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                               &PsrrPlannerNodelet::goalCB, this);
 
     // publishers
-    tree_markers_pub_ = mt_nh_.advertise<visualization_msgs::MarkerArray>(
+    planner_markers_pub_ = mt_nh_.advertise<visualization_msgs::MarkerArray>(
         "/psrr_planner/markers", 10);
     path_pub_ = mt_nh_.advertise<psrr_msgs::Path>("/psrr_planner/path", 1);
     path_2d_pub_ = mt_nh_.advertise<nav_msgs::Path>("/psrr_planner/path_2d", 1);
@@ -550,21 +549,20 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       }
     }
 
-    // publish tree markers
-    if (tree_markers_pub_.getNumSubscribers()) {
+    // publish markers
+    if (planner_markers_pub_.getNumSubscribers()) {
       visualization_msgs::MarkerArray markers;
-      markers.markers.resize(1);
 
       // edge markers
-      visualization_msgs::Marker& vertices_marker = markers.markers[0];
-      vertices_marker.header.frame_id = "map";
-      vertices_marker.header.stamp = ros::Time::now();
-      vertices_marker.ns = "edges";
-      vertices_marker.id = 0;
-      vertices_marker.action = visualization_msgs::Marker::ADD;
-      vertices_marker.type = visualization_msgs::Marker::LINE_LIST;
-      vertices_marker.pose.orientation.w = 1.0;
-      vertices_marker.scale.x = 0.01;
+      visualization_msgs::Marker edges_marker;
+      edges_marker.header.frame_id = "map";
+      edges_marker.header.stamp = ros::Time::now();
+      edges_marker.ns = "edges";
+      edges_marker.id = 0;
+      edges_marker.action = visualization_msgs::Marker::ADD;
+      edges_marker.type = visualization_msgs::Marker::LINE_LIST;
+      edges_marker.pose.orientation.w = 1.0;
+      edges_marker.scale.x = 0.01;
 
       std_msgs::ColorRGBA color;
       color.r = 1.0;
@@ -577,17 +575,64 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         p1.x = static_cast<double>(edge.first->state.x);
         p1.y = static_cast<double>(edge.first->state.y);
         p1.z = 0.0;
-        vertices_marker.points.push_back(p1);
-        vertices_marker.colors.push_back(color);
+        edges_marker.points.push_back(p1);
+        edges_marker.colors.push_back(color);
         geometry_msgs::Point p2;
         p2.x = static_cast<double>(edge.second->state.x);
         p2.y = static_cast<double>(edge.second->state.y);
         p2.z = 0.0;
-        vertices_marker.points.push_back(p2);
-        vertices_marker.colors.push_back(color);
+        edges_marker.points.push_back(p2);
+        edges_marker.colors.push_back(color);
       }
 
-      tree_markers_pub_.publish(markers);
+      markers.markers.emplace_back(std::move(edges_marker));
+
+      // if we are using informed rrt*
+      // we have an option to visualize the informed set only for 2D planar
+      // surface (future work will focus for general 3D robots)
+      if (planner_type_ == "informed_rrt_star" && planner_->hasSolution()) {
+        visualization_msgs::Marker ellipse_marker;
+        ellipse_marker.header.frame_id = "map";
+        ellipse_marker.header.stamp = ros::Time::now();
+        ellipse_marker.ns = "ellipse";
+        ellipse_marker.id = 1;
+        ellipse_marker.action = visualization_msgs::Marker::ADD;
+        ellipse_marker.type = visualization_msgs::Marker::CYLINDER;
+        ellipse_marker.scale.z = 0.01;
+
+        // find transverse and conjugate diameters for scale.x and scale.y
+        ellipse_marker.scale.x =
+            std::static_pointer_cast<InformedRRTStar>(planner_)
+                ->getTransverseDiameter();
+        ellipse_marker.scale.y =
+            std::static_pointer_cast<InformedRRTStar>(planner_)
+                ->getConjugateDiameter();
+
+        // find ellipse center
+        auto center = std::static_pointer_cast<InformedRRTStar>(planner_)
+                          ->getEllipseCenter();
+        ellipse_marker.pose.position.x = center[0];
+        ellipse_marker.pose.position.y = center[1];
+
+        // find ellipse orientation
+        const geometry_msgs::Quaternion orientation(
+            tf::createQuaternionMsgFromYaw(
+                std::static_pointer_cast<InformedRRTStar>(planner_)
+                    ->getEllipseOrientation()));
+        ellipse_marker.pose.orientation = orientation;
+
+        // update colors
+        std_msgs::ColorRGBA color;
+        color.r = 1.0;
+        color.g = 0.0;
+        color.b = 0.0;
+        color.a = 0.3;
+        ellipse_marker.color = color;
+
+        markers.markers.emplace_back(std::move(ellipse_marker));
+      }
+
+      planner_markers_pub_.publish(markers);
     }
   }
 
@@ -700,7 +745,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   // publishers
   ros::Publisher path_pub_;
   ros::Publisher path_2d_pub_;
-  ros::Publisher tree_markers_pub_;
+  ros::Publisher planner_markers_pub_;
   ros::Publisher footprint_arr_pub_;
 
   // timers
@@ -716,6 +761,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   std::unique_ptr<costmap_2d::Costmap2DROS> planner_costmap_ros_;
   std::shared_ptr<GridCollisionChecker> collision_checker_;
 
+  std::string planner_type_;
   std::shared_ptr<BasePlanner> planner_;
   Vertex start_vertex_;
   Vertex goal_vertex_;

@@ -65,6 +65,19 @@ void InformedRRTStar::init(const Vertex& start, const Vertex& goal) {
   convertVertexToVectorXd(start_vertex_, x_start_focus_);
   convertVertexToVectorXd(goal_vertex_, x_goal_focus_);
 
+  // 2d ellipse properties for visualization purposes
+  transverse_dia_2d_ = std::numeric_limits<double>::infinity();
+  conjugate_dia_2d_ = std::numeric_limits<double>::infinity();
+  d_focii_2d_ = euclideanDistance2D(start_vertex_, goal_vertex_);
+  ellipse_orien_2d_ =
+      std::atan2(goal_vertex_->state.y - start_vertex_->state.y,
+                 goal_vertex_->state.x - start_vertex_->state.x);
+  ellipse_center_2d_.resize(2);
+  ellipse_center_2d_[0] =
+      0.5 * (start_vertex_->state.x + goal_vertex_->state.x);
+  ellipse_center_2d_[1] =
+      0.5 * (start_vertex_->state.y + goal_vertex_->state.y);
+
   c_i_ = std::numeric_limits<double>::infinity();
   c_min_ = (x_start_focus_ - x_goal_focus_).norm();
   x_center_ = 0.5 * (x_start_focus_ + x_goal_focus_);
@@ -93,6 +106,19 @@ void InformedRRTStar::convertVertexToVectorXd(
   vec[1] = v->state.y;
   for (std::size_t i = 0; i < v->state.joint_pos.size(); ++i) {
     vec[i + 2] = v->state.joint_pos[i];
+  }
+}
+
+void InformedRRTStar::updateConjugateDiameter2D() {
+  // update the conjugate diameter of the 2d ellipse
+  // this function will throw error if either transverse diameter or minimum
+  // transverse diameter does not exist
+  if (transverse_dia_2d_ < std::numeric_limits<double>::infinity() &&
+      d_focii_2d_ < std::numeric_limits<double>::infinity()) {
+    conjugate_dia_2d_ = std::sqrt(transverse_dia_2d_ * transverse_dia_2d_ -
+                                  d_focii_2d_ * d_focii_2d_);
+  } else {
+    throw "Error. Transverse diameter does not exist.";
   }
 }
 
@@ -318,6 +344,16 @@ double InformedRRTStar::euclideanCost(std::shared_ptr<Vertex> v) {
   return cost;
 }
 
+double InformedRRTStar::euclideanCost2D(std::shared_ptr<Vertex> v) {
+  std::shared_ptr<Vertex> curr_p = std::move(v);
+  double cost = 0.0;
+  while (curr_p->parent) {
+    cost += euclideanDistance2D(curr_p, curr_p->parent);
+    curr_p = curr_p->parent;
+  }
+  return cost;
+}
+
 double InformedRRTStar::euclideanDistance(
     const std::shared_ptr<const Vertex>& v1,
     const std::shared_ptr<const Vertex>& v2) {
@@ -336,6 +372,19 @@ double InformedRRTStar::euclideanDistance(
   return total_dist;
 }
 
+double InformedRRTStar::euclideanDistance2D(
+    const std::shared_ptr<const Vertex>& v1,
+    const std::shared_ptr<const Vertex>& v2) {
+  double total_dist = 0.0;
+
+  // calculate distance in R^2 state space
+  total_dist += (v1->state.x - v2->state.x) * (v1->state.x - v2->state.x) +
+                (v1->state.y - v2->state.y) * (v1->state.y - v2->state.y);
+
+  total_dist = std::sqrt(total_dist);
+  return total_dist;
+}
+
 bool InformedRRTStar::inGoalRegion(const std::shared_ptr<const Vertex>& v) {
   if (distance(v, goal_vertex_) <= goal_radius_) return true;
   return false;
@@ -348,6 +397,7 @@ void InformedRRTStar::update() {
     // find the current best solution cost and parent vertex
     std::shared_ptr<Vertex> best_vertex;
     double min_cost = std::numeric_limits<double>::infinity();
+    double min_cost_2d = std::numeric_limits<double>::infinity();
 
     if (x_soln_.size() > 0) {
       for (const auto& v : x_soln_) {
@@ -358,10 +408,19 @@ void InformedRRTStar::update() {
         }
       }
       min_cost += euclideanDistance(best_vertex, goal_vertex_);
+
+      // we need to find 2D transverse diameter
+      // we gonna use it for visualization purposes
+      min_cost_2d = euclideanCost2D(best_vertex) +
+                    euclideanDistance2D(best_vertex, goal_vertex_);
     }
 
     if (min_cost < c_i_) {
       c_i_ = min_cost;
+
+      // update 2D transverse and conjugate diameters
+      transverse_dia_2d_ = min_cost_2d;
+      updateConjugateDiameter2D();
 
       // Update the new measure:
       // make sure we include SO(2) component
@@ -473,4 +532,5 @@ double InformedRRTStar::getSolutionCost() {
   }
   return total_cost;
 }
+
 }  // namespace psrr_planner
