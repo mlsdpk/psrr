@@ -257,8 +257,9 @@ double BasePlanner::euclideanCost2D(std::shared_ptr<Vertex> v) {
   return cost;
 }
 
-double BasePlanner::euclideanDistance(const std::shared_ptr<const Vertex>& v1,
-                                      const std::shared_ptr<const Vertex>& v2) {
+double BasePlanner::euclideanDistance(
+    const std::shared_ptr<const Vertex>& v1,
+    const std::shared_ptr<const Vertex>& v2) const {
   double total_dist = 0.0;
 
   // calculate distance in R^n state space
@@ -276,7 +277,7 @@ double BasePlanner::euclideanDistance(const std::shared_ptr<const Vertex>& v1,
 
 double BasePlanner::euclideanDistance2D(
     const std::shared_ptr<const Vertex>& v1,
-    const std::shared_ptr<const Vertex>& v2) {
+    const std::shared_ptr<const Vertex>& v2) const {
   double total_dist = 0.0;
 
   // calculate distance in R^2 state space

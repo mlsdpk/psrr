@@ -198,6 +198,27 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     if (private_nh_.hasParam("planner_type")) {
       private_nh_.param<std::string>("planner_type", planner_type_,
                                      planner_type_);
+
+      // now check seeding is used or not
+      bool use_seed = false;
+      int seed_number = 0;
+
+      if (private_nh_.hasParam("use_seed")) {
+        private_nh_.param<bool>("use_seed", use_seed, use_seed);
+        if (use_seed) {
+          if (private_nh_.hasParam("seed_number")) {
+            private_nh_.param<int>("seed_number", seed_number, seed_number);
+            ROS_INFO("Random seed %d provided.", seed_number);
+          } else {
+            ROS_INFO("Default Random seed 0 is used.");
+          }
+        } else {
+          ROS_INFO("Random seeding is used.");
+        }
+      } else {
+        ROS_WARN("use_seed parameter not found. Using random seeding...");
+      }
+
       // RRT
       if (planner_type_ == "rrt") {
         ROS_INFO("Planner Type: rrt");
@@ -216,28 +237,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                                     interpolation_dist, interpolation_dist);
           private_nh_.param<double>("rrt/goal_radius", goal_radius,
                                     goal_radius);
-
-          // now check seeding is used or not
-          bool use_seed = false;
-          int seed_number = 0;
-
-          if (private_nh_.hasParam("rrt/use_seed")) {
-            private_nh_.param<bool>("rrt/use_seed", use_seed, use_seed);
-            if (use_seed) {
-              if (private_nh_.hasParam("rrt/seed_number")) {
-                private_nh_.param<int>("rrt/seed_number", seed_number,
-                                       seed_number);
-                ROS_INFO("Random seed %d provided.", seed_number);
-              } else {
-                ROS_INFO("Default Random seed 0 is used.");
-              }
-            } else {
-              ROS_INFO("Random seeding is used.");
-            }
-          } else {
-            ROS_WARN(
-                "RRT use_seed parameter not found. Using random seeding...");
-          }
 
           // create rrt planner
           planner_.reset(new RRT(
@@ -273,29 +272,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           private_nh_.param<double>("rrt_star/goal_radius", goal_radius,
                                     goal_radius);
 
-          // now check seeding is used or not
-          bool use_seed = false;
-          int seed_number = 0;
-
-          if (private_nh_.hasParam("rrt_star/use_seed")) {
-            private_nh_.param<bool>("rrt_star/use_seed", use_seed, use_seed);
-            if (use_seed) {
-              if (private_nh_.hasParam("rrt_star/seed_number")) {
-                private_nh_.param<int>("rrt_star/seed_number", seed_number,
-                                       seed_number);
-                ROS_INFO("Random seed %d provided.", seed_number);
-              } else {
-                ROS_INFO("Default Random seed 0 is used.");
-              }
-            } else {
-              ROS_INFO("Random seeding is used.");
-            }
-          } else {
-            ROS_WARN(
-                "RRT-STAR use_seed parameter not found. Using random "
-                "seeding...");
-          }
-
           int print_every = 0;
           private_nh_.param<int>("rrt_star/print_every", print_every,
                                  print_every);
@@ -313,7 +289,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       } else if (planner_type_ == "informed_rrt_star") {
         ROS_INFO("Planner Type: informed_rrt_star");
 
-        // TODO: add informed_rrt_star stuffs here
         // we need to check planner specific parameters are given
         if (private_nh_.hasParam("informed_rrt_star/max_iterations") &&
             private_nh_.hasParam("informed_rrt_star/max_sampling_tries") &&
@@ -321,9 +296,11 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
             private_nh_.hasParam("informed_rrt_star/rewire_factor") &&
             private_nh_.hasParam("informed_rrt_star/interpolation_dist") &&
             private_nh_.hasParam("informed_rrt_star/goal_radius") &&
+            private_nh_.hasParam("informed_rrt_star/use_greedy_informed_set") &&
             private_nh_.hasParam("informed_rrt_star/update_goal_every")) {
           int max_iterations, max_sampling_tries, update_goal_every;
           double max_distance, rewire_factor, interpolation_dist, goal_radius;
+          bool use_greedy_informed_set = false;
           private_nh_.param<int>("informed_rrt_star/max_iterations",
                                  max_iterations, max_iterations);
           private_nh_.param<int>("informed_rrt_star/max_sampling_tries",
@@ -336,34 +313,11 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                                     interpolation_dist, interpolation_dist);
           private_nh_.param<double>("informed_rrt_star/goal_radius",
                                     goal_radius, goal_radius);
+          private_nh_.param<bool>("informed_rrt_star/use_greedy_informed_set",
+                                  use_greedy_informed_set,
+                                  use_greedy_informed_set);
           private_nh_.param<int>("informed_rrt_star/update_goal_every",
                                  update_goal_every, update_goal_every);
-
-          // now check seeding is used or not
-          // TODO: seeding parameter is used in all the planners. It is better
-          // to put it outside independent of the specific planner.
-          bool use_seed = false;
-          int seed_number = 0;
-
-          if (private_nh_.hasParam("informed_rrt_star/use_seed")) {
-            private_nh_.param<bool>("informed_rrt_star/use_seed", use_seed,
-                                    use_seed);
-            if (use_seed) {
-              if (private_nh_.hasParam("informed_rrt_star/seed_number")) {
-                private_nh_.param<int>("informed_rrt_star/seed_number",
-                                       seed_number, seed_number);
-                ROS_INFO("Random seed %d provided.", seed_number);
-              } else {
-                ROS_INFO("Default Random seed 0 is used.");
-              }
-            } else {
-              ROS_INFO("Random seeding is used.");
-            }
-          } else {
-            ROS_WARN(
-                "Informed RRT* use_seed parameter not found. Using random "
-                "seeding...");
-          }
 
           int print_every = 0;
           private_nh_.param<int>("informed_rrt_star/print_every", print_every,
@@ -373,8 +327,8 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           planner_.reset(new InformedRRTStar(
               state_limits, collision_checker_, max_iterations,
               max_sampling_tries, max_distance, rewire_factor,
-              interpolation_dist, goal_radius, update_goal_every, use_seed,
-              seed_number, print_every));
+              interpolation_dist, goal_radius, update_goal_every,
+              use_greedy_informed_set, use_seed, seed_number, print_every));
         } else {
           ROS_ERROR("Informed RRT* specific parameters not found.");
           return;
@@ -589,38 +543,56 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       markers.markers.emplace_back(std::move(edges_marker));
 
       // if we are using informed rrt*
-      // we have an option to visualize the informed set only for 2D planar
-      // surface (future work will focus for general 3D robots)
+      // we have an option to visualize the informed set and greedy informed set
+      // only for 2D planar surface (future work will focus for general 3D
+      // robots)
       if (planner_type_ == "informed_rrt_star" && planner_->hasSolution()) {
-        visualization_msgs::Marker ellipse_marker;
-        ellipse_marker.header.frame_id = "map";
-        ellipse_marker.header.stamp = ros::Time::now();
-        ellipse_marker.ns = "ellipse";
-        ellipse_marker.id = 1;
-        ellipse_marker.action = visualization_msgs::Marker::ADD;
-        ellipse_marker.type = visualization_msgs::Marker::CYLINDER;
-        ellipse_marker.scale.z = 0.01;
+        visualization_msgs::Marker informed_set_marker;
+        informed_set_marker.header.frame_id = "map";
+        informed_set_marker.header.stamp = ros::Time::now();
+        informed_set_marker.ns = "informed_set";
+        informed_set_marker.id = 1;
+        informed_set_marker.action = visualization_msgs::Marker::ADD;
+        informed_set_marker.type = visualization_msgs::Marker::CYLINDER;
+        informed_set_marker.scale.z = 0.01;
+
+        visualization_msgs::Marker greedy_informed_set_marker;
+        greedy_informed_set_marker.header.frame_id = "map";
+        greedy_informed_set_marker.header.stamp = ros::Time::now();
+        greedy_informed_set_marker.ns = "greedy_informed_set";
+        greedy_informed_set_marker.id = 2;
+        greedy_informed_set_marker.action = visualization_msgs::Marker::ADD;
+        greedy_informed_set_marker.type = visualization_msgs::Marker::CYLINDER;
+        greedy_informed_set_marker.scale.z = 0.01;
 
         // find transverse and conjugate diameters for scale.x and scale.y
-        ellipse_marker.scale.x =
+        auto transverse_diameter =
             std::static_pointer_cast<InformedRRTStar>(planner_)
                 ->getTransverseDiameter();
-        ellipse_marker.scale.y =
+        auto conjugate_diameter =
             std::static_pointer_cast<InformedRRTStar>(planner_)
                 ->getConjugateDiameter();
+
+        informed_set_marker.scale.x = transverse_diameter[0];
+        informed_set_marker.scale.y = conjugate_diameter[0];
+        greedy_informed_set_marker.scale.x = transverse_diameter[1];
+        greedy_informed_set_marker.scale.y = conjugate_diameter[1];
 
         // find ellipse center
         auto center = std::static_pointer_cast<InformedRRTStar>(planner_)
                           ->getEllipseCenter();
-        ellipse_marker.pose.position.x = center[0];
-        ellipse_marker.pose.position.y = center[1];
+        informed_set_marker.pose.position.x = center[0];
+        informed_set_marker.pose.position.y = center[1];
+        greedy_informed_set_marker.pose.position.x = center[0];
+        greedy_informed_set_marker.pose.position.y = center[1];
 
         // find ellipse orientation
         const geometry_msgs::Quaternion orientation(
             tf::createQuaternionMsgFromYaw(
                 std::static_pointer_cast<InformedRRTStar>(planner_)
                     ->getEllipseOrientation()));
-        ellipse_marker.pose.orientation = orientation;
+        informed_set_marker.pose.orientation = orientation;
+        greedy_informed_set_marker.pose.orientation = orientation;
 
         // update colors
         std_msgs::ColorRGBA color;
@@ -628,9 +600,16 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         color.g = 0.0;
         color.b = 0.0;
         color.a = 0.3;
-        ellipse_marker.color = color;
+        informed_set_marker.color = color;
 
-        markers.markers.emplace_back(std::move(ellipse_marker));
+        color.r = 0.0;
+        color.g = 0.0;
+        color.b = 1.0;
+        color.a = 0.3;
+        greedy_informed_set_marker.color = color;
+
+        markers.markers.emplace_back(std::move(informed_set_marker));
+        markers.markers.emplace_back(std::move(greedy_informed_set_marker));
       }
 
       planner_markers_pub_.publish(markers);

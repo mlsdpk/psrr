@@ -51,6 +51,8 @@ class InformedRRTStar : public RRTStar {
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
    * @param update_goal_every Find best goal parent at every n iteration
+   * @param use_greedy_informed_set Whether use greedy informed set or not
+   * (default: false)
    * @param use_seed Either use seeding or not (default: false)
    * @param seed_number Seed number to be used if use_seed is true. (default: 0)
    * @param print_every Print solution info at every n iteration (default: 0)
@@ -60,7 +62,8 @@ class InformedRRTStar : public RRTStar {
                   unsigned int max_iterations, unsigned int max_sampling_tries,
                   double max_distance, double rewire_factor,
                   double interpolation_dist, double goal_radius,
-                  unsigned int update_goal_every, bool use_seed = false,
+                  unsigned int update_goal_every,
+                  bool use_greedy_informed_set = false, bool use_seed = false,
                   unsigned int seed_number = 0, unsigned int print_every = 0);
 
   /**
@@ -85,14 +88,14 @@ class InformedRRTStar : public RRTStar {
   /**
    * @brief Getter for 2d ellipse transverse diameter
    */
-  const double getTransverseDiameter() const noexcept {
+  const std::vector<double>& getTransverseDiameter() const noexcept {
     return transverse_dia_2d_;
   }
 
   /**
    * @brief Getter for 2d ellipse conjugate diameter
    */
-  const double getConjugateDiameter() const noexcept {
+  const std::vector<double>& getConjugateDiameter() const noexcept {
     return conjugate_dia_2d_;
   }
 
@@ -117,6 +120,16 @@ class InformedRRTStar : public RRTStar {
    * @param v Sampled vertex
    */
   void sample(const std::shared_ptr<Vertex>& v) override;
+
+  /**
+   * @brief Admissible estimate of a vertex
+   */
+  double heuristicCost(const std::shared_ptr<const Vertex>& v) const;
+
+  /**
+   * @brief Admissible estimate of a vertex in 2D (x and y)
+   */
+  double heuristicCost2D(const std::shared_ptr<const Vertex>& v) const;
 
   /**
    * @brief Uniform random sampling of a unit-length vector, i.e., the surface
@@ -171,6 +184,11 @@ class InformedRRTStar : public RRTStar {
    */
   unsigned int max_sampling_tries_;
 
+  /**
+   * @brief Whether use greedy informed set or not
+   */
+  bool use_greedy_informed_set_;
+
   Eigen::VectorXd x_start_focus_;  // start focal point
   Eigen::VectorXd x_goal_focus_;   // goal focal point
   Eigen::VectorXd x_center_;       // ellipse center point
@@ -179,8 +197,10 @@ class InformedRRTStar : public RRTStar {
                   // transverse diameter)
 
   // 2d ellipse properties
-  double transverse_dia_2d_;               // transverse diameter
-  double conjugate_dia_2d_;                // conjugate diameter
+  // transverse and conjugate diameters for both informed and greedy informed
+  // sets
+  std::vector<double> transverse_dia_2d_;  // transverse diameter
+  std::vector<double> conjugate_dia_2d_;   // conjugate diameter
   double d_focii_2d_;                      // distance between two focii
   double ellipse_orien_2d_;                // orientation of the ellipse
   std::vector<double> ellipse_center_2d_;  // center point of the ellipse

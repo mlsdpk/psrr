@@ -31,13 +31,15 @@ InformedRRTStar::InformedRRTStar(
     std::shared_ptr<GridCollisionChecker> collision_checker,
     unsigned int max_iterations, unsigned int max_sampling_tries,
     double max_distance, double rewire_factor, double interpolation_dist,
-    double goal_radius, unsigned int update_goal_every, bool use_seed,
-    unsigned int seed_number, unsigned int print_every)
+    double goal_radius, unsigned int update_goal_every,
+    bool use_greedy_informed_set, bool use_seed, unsigned int seed_number,
+    unsigned int print_every)
     : RRTStar(state_limits, collision_checker, max_iterations,
               update_goal_every, max_distance, rewire_factor,
               interpolation_dist, goal_radius, use_seed, seed_number,
               print_every),
-      max_sampling_tries_{max_sampling_tries} {}
+      max_sampling_tries_{max_sampling_tries},
+      use_greedy_informed_set_{use_greedy_informed_set} {}
 
 InformedRRTStar::~InformedRRTStar(){};
 
@@ -62,8 +64,10 @@ void InformedRRTStar::init(const Vertex& start, const Vertex& goal) {
   convertVertexToVectorXd(goal_vertex_, x_goal_focus_);
 
   // 2d ellipse properties for visualization purposes
-  transverse_dia_2d_ = std::numeric_limits<double>::infinity();
-  conjugate_dia_2d_ = std::numeric_limits<double>::infinity();
+  transverse_dia_2d_.clear();
+  transverse_dia_2d_.resize(2);
+  conjugate_dia_2d_.clear();
+  conjugate_dia_2d_.resize(2);
   d_focii_2d_ = euclideanDistance2D(start_vertex_, goal_vertex_);
   ellipse_orien_2d_ =
       std::atan2(goal_vertex_->state.y - start_vertex_->state.y,
@@ -102,13 +106,12 @@ void InformedRRTStar::convertVertexToVectorXd(
 }
 
 void InformedRRTStar::updateConjugateDiameter2D() {
-  if (transverse_dia_2d_ < std::numeric_limits<double>::infinity() &&
-      d_focii_2d_ < std::numeric_limits<double>::infinity()) {
-    conjugate_dia_2d_ = std::sqrt(transverse_dia_2d_ * transverse_dia_2d_ -
-                                  d_focii_2d_ * d_focii_2d_);
-  } else {
-    throw "Error. Transverse diameter does not exist.";
-  }
+  conjugate_dia_2d_[0] =
+      std::sqrt(transverse_dia_2d_[0] * transverse_dia_2d_[0] -
+                d_focii_2d_ * d_focii_2d_);
+  conjugate_dia_2d_[1] =
+      std::sqrt(transverse_dia_2d_[1] * transverse_dia_2d_[1] -
+                d_focii_2d_ * d_focii_2d_);
 }
 
 void InformedRRTStar::updateRotationMatrix() {
@@ -276,36 +279,84 @@ void InformedRRTStar::sample(const std::shared_ptr<Vertex>& v) {
   }
 }
 
+double InformedRRTStar::heuristicCost(
+    const std::shared_ptr<const Vertex>& v) const {
+  // heuristic cost to come + heuristic cost to go
+  return euclideanDistance(start_vertex_, v) +
+         euclideanDistance(v, goal_vertex_);
+}
+
+double InformedRRTStar::heuristicCost2D(
+    const std::shared_ptr<const Vertex>& v) const {
+  // 2D heuristic cost to come + heuristic cost to go
+  return euclideanDistance2D(start_vertex_, v) +
+         euclideanDistance2D(v, goal_vertex_);
+}
+
 void InformedRRTStar::update() {
   if (planning_finished_) return;
 
   if (iteration_number_ <= max_iterations_) {
     // find the current best solution cost and parent vertex
-    std::shared_ptr<Vertex> best_vertex;
-    double min_cost = std::numeric_limits<double>::infinity();
-    double min_cost_2d = std::numeric_limits<double>::infinity();
+    double best_cost = std::numeric_limits<double>::infinity();
+    double greedy_best_cost = std::numeric_limits<double>::infinity();
+    double best_cost_2d, greedy_best_cost_2d;
 
     if (x_soln_.size() > 0) {
+      // find the best parent vertex for the goal
+      std::shared_ptr<Vertex> best_goal_parent;
       for (const auto& v : x_soln_) {
         double c = euclideanCost(v);
-        if (c < min_cost) {
-          min_cost = c;
-          best_vertex = v;
+        if (c < best_cost) {
+          best_cost = c;
+          best_goal_parent = v;
         }
       }
-      min_cost += euclideanDistance(best_vertex, goal_vertex_);
 
+      // now we need to find properties for both informed set and greedy
+      // informed set just for visualization purposes, however we only use one
+      // during sampling based on use_greedy_informed_set_ flag
+
+      // greedy informed set stuffs
+      double greedy_max_cost = 0.0;
+      std::shared_ptr<Vertex> greedy_max_vertex;
+      std::shared_ptr<Vertex> curr_v = best_goal_parent;
+      while (curr_v->parent) {
+        double hc = heuristicCost(curr_v);
+        if (hc > greedy_max_cost) {
+          greedy_max_cost = hc;
+          greedy_max_vertex = curr_v;
+        }
+        curr_v = curr_v->parent;
+      }
+      greedy_best_cost = greedy_max_cost;
+      greedy_best_cost_2d = heuristicCost2D(greedy_max_vertex);
+
+      // informed set stuffs
+      best_cost += euclideanDistance(best_goal_parent, goal_vertex_);
       // we need to find 2D transverse diameter
       // we gonna use it for visualization purposes
-      min_cost_2d = euclideanCost2D(best_vertex) +
-                    euclideanDistance2D(best_vertex, goal_vertex_);
+      best_cost_2d = euclideanCost2D(best_goal_parent) +
+                     euclideanDistance2D(best_goal_parent, goal_vertex_);
     }
 
-    if (min_cost < c_i_) {
-      c_i_ = min_cost;
+    bool c_i_updated = false;
+    if (use_greedy_informed_set_) {
+      if (greedy_best_cost < c_i_) {
+        c_i_ = greedy_best_cost;
+        c_i_updated = true;
+      }
+    } else {
+      if (best_cost < c_i_) {
+        c_i_ = best_cost;
+        c_i_updated = true;
+      }
+    }
 
+    if (c_i_updated) {
       // update 2D transverse and conjugate diameters
-      transverse_dia_2d_ = min_cost_2d;
+      transverse_dia_2d_[0] = best_cost_2d;
+      transverse_dia_2d_[1] = greedy_best_cost_2d;
       updateConjugateDiameter2D();
 
       // Update the new measure:

@@ -141,15 +141,17 @@ class BasePlanner {
    * @brief The euclidean distance between two vertices (this function does not
    * use SO(n) components since they are not informed)
    */
-  virtual double euclideanDistance(const std::shared_ptr<const Vertex>& v1,
-                                   const std::shared_ptr<const Vertex>& v2);
+  virtual double euclideanDistance(
+      const std::shared_ptr<const Vertex>& v1,
+      const std::shared_ptr<const Vertex>& v2) const;
 
   /**
    * @brief The 2D euclidean distance between two vertices (this function only
    * uses x and y state spaces)
    */
-  virtual double euclideanDistance2D(const std::shared_ptr<const Vertex>& v1,
-                                     const std::shared_ptr<const Vertex>& v2);
+  virtual double euclideanDistance2D(
+      const std::shared_ptr<const Vertex>& v1,
+      const std::shared_ptr<const Vertex>& v2) const;
 
   /**
    * @brief Check whether a vertex lies within goal radius or not
