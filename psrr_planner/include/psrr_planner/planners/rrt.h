@@ -38,7 +38,7 @@ class RRT : public BasePlanner {
    * @param state_limits The state space of the robot including limits
    * @param collision_checker Grid Collision Checker
    * @param max_iterations Maximum number of iterations to run the algorithm
-   * @param delta_q Maximum distance allowed between two vertices
+   * @param max_distance Maximum distance allowed between two vertices
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
    * @param use_seed Either use seeding or not (default: false)
@@ -46,8 +46,9 @@ class RRT : public BasePlanner {
    */
   RRT(const StateLimits& state_limits,
       std::shared_ptr<GridCollisionChecker> collision_checker,
-      unsigned int max_iterations, double delta_q, double interpolation_dist,
-      double goal_radius, bool use_seed = false, unsigned int seed_number = 0);
+      unsigned int max_iterations, double max_distance,
+      double interpolation_dist, double goal_radius, bool use_seed = false,
+      unsigned int seed_number = 0);
 
   /**
    * @brief A destructor for psrr_planner::RRT
@@ -68,46 +69,11 @@ class RRT : public BasePlanner {
    */
   void update() override;
 
-  /**
-   * @brief Function for finding the solution and calculating the path cost
-   * @return Solution cost
-   */
-  double getSolutionCost() override;
-
  private:
-  /**
-   * @brief Randomly sample a n-dimensional state limited by min and max of each
-   * state variables
-   * @param v Sampled vertex
-   */
-  void sampleFree(const std::shared_ptr<Vertex>& v);
-
-  /**
-   * @brief Find the nearest neighbour in a tree
-   * @param v Nearest vertex
-   */
-  void nearest(const std::shared_ptr<const Vertex>& x_rand,
-               std::shared_ptr<Vertex>& x_near);
-
-  /**
-   * @brief Maximum number of iterations to run the algorithm
-   */
-  unsigned int max_iterations_;
-
-  /**
-   * @brief Iteration number to keep track
-   */
-  unsigned int iteration_number_;
-
   /**
    * @brief Maximum distance allowed between two vertices
    */
-  double delta_q_;
-
-  /**
-   * @brief Distance between vertex and goal to stop planning
-   */
-  double goal_radius_;
+  double max_distance_;
 };
 
 }  // namespace psrr_planner

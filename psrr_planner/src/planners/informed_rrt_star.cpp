@@ -33,15 +33,11 @@ InformedRRTStar::InformedRRTStar(
     double max_distance, double rewire_factor, double interpolation_dist,
     double goal_radius, unsigned int update_goal_every, bool use_seed,
     unsigned int seed_number, unsigned int print_every)
-    : BasePlanner(state_limits, collision_checker, interpolation_dist, use_seed,
-                  seed_number),
-      max_iterations_{max_iterations},
-      max_sampling_tries_{max_sampling_tries},
-      max_distance_{max_distance},
-      rewire_factor_{rewire_factor},
-      goal_radius_{goal_radius},
-      update_goal_every_{update_goal_every},
-      print_every_{print_every} {}
+    : RRTStar(state_limits, collision_checker, max_iterations,
+              update_goal_every, max_distance, rewire_factor,
+              interpolation_dist, goal_radius, use_seed, seed_number,
+              print_every),
+      max_sampling_tries_{max_sampling_tries} {}
 
 InformedRRTStar::~InformedRRTStar(){};
 
@@ -81,10 +77,6 @@ void InformedRRTStar::init(const Vertex& start, const Vertex& goal) {
   c_i_ = std::numeric_limits<double>::infinity();
   c_min_ = (x_start_focus_ - x_goal_focus_).norm();
   x_center_ = 0.5 * (x_start_focus_ + x_goal_focus_);
-  std::cout << "x_center x: " << x_center_[0] << std::endl;
-  std::cout << "x_center y: " << x_center_[1] << std::endl;
-  std::cout << "x_center j1: " << x_center_[2] << std::endl;
-  std::cout << "x_center j2: " << x_center_[3] << std::endl;
   updateRotationMatrix();
 
   // initially no solution is found yet
@@ -110,9 +102,6 @@ void InformedRRTStar::convertVertexToVectorXd(
 }
 
 void InformedRRTStar::updateConjugateDiameter2D() {
-  // update the conjugate diameter of the 2d ellipse
-  // this function will throw error if either transverse diameter or minimum
-  // transverse diameter does not exist
   if (transverse_dia_2d_ < std::numeric_limits<double>::infinity() &&
       d_focii_2d_ < std::numeric_limits<double>::infinity()) {
     conjugate_dia_2d_ = std::sqrt(transverse_dia_2d_ * transverse_dia_2d_ -
@@ -287,109 +276,6 @@ void InformedRRTStar::sample(const std::shared_ptr<Vertex>& v) {
   }
 }
 
-void InformedRRTStar::nearest(const std::shared_ptr<const Vertex>& x_rand,
-                              std::shared_ptr<Vertex>& x_near) {
-  double minDist = std::numeric_limits<double>::infinity();
-
-  for (const auto& v : vertices_) {
-    double dist = distance(v, x_rand);
-    if (dist < minDist) {
-      minDist = dist;
-      x_near = v;
-    }
-  }
-}
-
-void InformedRRTStar::near(const std::shared_ptr<const Vertex>& x_new,
-                           std::vector<std::shared_ptr<Vertex>>& X_near) {
-  double r = std::min(
-      r_rrt_ * std::pow(std::log(static_cast<double>(vertices_.size())) /
-                            (static_cast<double>(vertices_.size())),
-                        1.0 / static_cast<double>(state_dimensions_)),
-      max_distance_);
-
-  for (const auto& v : vertices_) {
-    if (distance(v, x_new) < r) {
-      X_near.emplace_back(v);
-    }
-  }
-}
-
-void InformedRRTStar::updateRewiringLowerBounds() {
-  // r_rrt > (2*(1+1/d))^(1/d)*(measure/ballvolume)^(1/d)
-  r_rrt_ =
-      rewire_factor_ *
-      std::pow(2 * (1.0 + 1.0 / static_cast<double>(state_dimensions_)) *
-                   (current_measure_ / unitNBallMeasure(state_dimensions_)),
-               1.0 / static_cast<double>(state_dimensions_));
-}
-
-double InformedRRTStar::cost(std::shared_ptr<Vertex> v) {
-  std::shared_ptr<Vertex> curr_p = std::move(v);
-  double cost = 0.0;
-  while (curr_p->parent) {
-    cost += distance(curr_p, curr_p->parent);
-    curr_p = curr_p->parent;
-  }
-  return cost;
-}
-
-double InformedRRTStar::euclideanCost(std::shared_ptr<Vertex> v) {
-  std::shared_ptr<Vertex> curr_p = std::move(v);
-  double cost = 0.0;
-  while (curr_p->parent) {
-    cost += euclideanDistance(curr_p, curr_p->parent);
-    curr_p = curr_p->parent;
-  }
-  return cost;
-}
-
-double InformedRRTStar::euclideanCost2D(std::shared_ptr<Vertex> v) {
-  std::shared_ptr<Vertex> curr_p = std::move(v);
-  double cost = 0.0;
-  while (curr_p->parent) {
-    cost += euclideanDistance2D(curr_p, curr_p->parent);
-    curr_p = curr_p->parent;
-  }
-  return cost;
-}
-
-double InformedRRTStar::euclideanDistance(
-    const std::shared_ptr<const Vertex>& v1,
-    const std::shared_ptr<const Vertex>& v2) {
-  double total_dist = 0.0;
-
-  // calculate distance in R^n state space
-  total_dist += (v1->state.x - v2->state.x) * (v1->state.x - v2->state.x) +
-                (v1->state.y - v2->state.y) * (v1->state.y - v2->state.y);
-
-  for (std::size_t i = 0; i < v1->state.joint_pos.size(); ++i) {
-    total_dist += (v1->state.joint_pos[i] - v2->state.joint_pos[i]) *
-                  (v1->state.joint_pos[i] - v2->state.joint_pos[i]);
-  }
-
-  total_dist = std::sqrt(total_dist);
-  return total_dist;
-}
-
-double InformedRRTStar::euclideanDistance2D(
-    const std::shared_ptr<const Vertex>& v1,
-    const std::shared_ptr<const Vertex>& v2) {
-  double total_dist = 0.0;
-
-  // calculate distance in R^2 state space
-  total_dist += (v1->state.x - v2->state.x) * (v1->state.x - v2->state.x) +
-                (v1->state.y - v2->state.y) * (v1->state.y - v2->state.y);
-
-  total_dist = std::sqrt(total_dist);
-  return total_dist;
-}
-
-bool InformedRRTStar::inGoalRegion(const std::shared_ptr<const Vertex>& v) {
-  if (distance(v, goal_vertex_) <= goal_radius_) return true;
-  return false;
-}
-
 void InformedRRTStar::update() {
   if (planning_finished_) return;
 
@@ -521,16 +407,6 @@ void InformedRRTStar::update() {
     std::cout << "Iterations number reach max limit. Algorithm stopped."
               << '\n';
   }
-}
-
-double InformedRRTStar::getSolutionCost() {
-  double total_cost = 0.0;
-  std::shared_ptr<Vertex> current = goal_vertex_;
-  while (current->parent && current != start_vertex_) {
-    total_cost += distance(current, current->parent);
-    current = current->parent;
-  }
-  return total_cost;
 }
 
 }  // namespace psrr_planner

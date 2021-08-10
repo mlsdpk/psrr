@@ -26,7 +26,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
 #include <psrr_planner/collision_checker.h>
-#include <psrr_planner/planners/base_planner.h>
+#include <psrr_planner/planners/rrt_star.h>
 #include <psrr_planner/utilities.h>
 
 #include <Eigen/Core>
@@ -37,7 +37,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 namespace psrr_planner {
 
-class InformedRRTStar : public BasePlanner {
+class InformedRRTStar : public RRTStar {
  public:
   /**
    * @brief A constructor for psrr_planner::RRT
@@ -83,12 +83,6 @@ class InformedRRTStar : public BasePlanner {
   void update() override;
 
   /**
-   * @brief Function for finding the solution and calculating the path cost
-   * @return Solution cost
-   */
-  double getSolutionCost() override;
-
-  /**
    * @brief Getter for 2d ellipse transverse diameter
    */
   const double getTransverseDiameter() const noexcept {
@@ -116,13 +110,13 @@ class InformedRRTStar : public BasePlanner {
     return ellipse_center_2d_;
   }
 
- private:
+ protected:
   /**
    * @brief Randomly sample a n-dimensional state limited by min and max of each
    * state variables
    * @param v Sampled vertex
    */
-  void sample(const std::shared_ptr<Vertex>& v);
+  void sample(const std::shared_ptr<Vertex>& v) override;
 
   /**
    * @brief Uniform random sampling of a unit-length vector, i.e., the surface
@@ -138,52 +132,6 @@ class InformedRRTStar : public BasePlanner {
   void uniformInBall(double r, std::vector<double>& v);
 
   /**
-   * @brief Find the nearest neighbour in a tree
-   * @param v Nearest vertex
-   */
-  void nearest(const std::shared_ptr<const Vertex>& x_rand,
-               std::shared_ptr<Vertex>& x_near);
-
-  /**
-   * @brief Find all the nearest neighbours inside the radius of particular
-   * vertex provided
-   * @param x_new Target vertex
-   * @param X_near Vector of nearest neighbours
-   */
-  void near(const std::shared_ptr<const Vertex>& x_new,
-            std::vector<std::shared_ptr<Vertex>>& X_near);
-
-  /**
-   * @brief The cost to come of a vertex considering all the state spaces
-   */
-  double cost(std::shared_ptr<Vertex> v);
-
-  /**
-   * @brief The cost to come of a vertex considering only the informed state
-   * spaces (without SO(n) components)
-   */
-  double euclideanCost(std::shared_ptr<Vertex> v);
-
-  /**
-   * @brief The cost to come of a vertex considering only x and y state spaces
-   */
-  double euclideanCost2D(std::shared_ptr<Vertex> v);
-
-  /**
-   * @brief The euclidean distance between two vertices (this function does not
-   * use SO(n) components since they are not informed)
-   */
-  double euclideanDistance(const std::shared_ptr<const Vertex>& v1,
-                           const std::shared_ptr<const Vertex>& v2);
-
-  /**
-   * @brief The 2D euclidean distance between two vertices (this function only
-   * uses x and y state spaces)
-   */
-  double euclideanDistance2D(const std::shared_ptr<const Vertex>& v1,
-                             const std::shared_ptr<const Vertex>& v2);
-
-  /**
    * @brief Convert vertex object into eigen vector. SO(2) component of
    * vertex is not added into vector since it is not informed.
    * @param v State vertex
@@ -192,6 +140,11 @@ class InformedRRTStar : public BasePlanner {
   void convertVertexToVectorXd(const std::shared_ptr<const Vertex>& v,
                                Eigen::VectorXd& vec);
 
+  /**
+   * @brief Update the conjugate diameter of the 2d ellipse. This function will
+   * throw error if either transverse diameter or minimum transverse diameter
+   * does not exist.
+   */
   void updateConjugateDiameter2D();
 
   /**
@@ -209,38 +162,13 @@ class InformedRRTStar : public BasePlanner {
   void updateTransformationMatrix();
 
   /**
-   * @brief Calculate r_rrt_ based on current measure
+   * @brief Number of dimensions of informed state spaces
    */
-  void updateRewiringLowerBounds();
-
-  /**
-   * @brief Check whether a vertex lies within goal radius or not
-   */
-  bool inGoalRegion(const std::shared_ptr<const Vertex>& v);
-
-  /**
-   * @brief Maximum number of iterations to run the algorithm
-   */
-  unsigned int max_iterations_;
-
-  /**
-   * @brief Iteration number to keep track
-   */
-  unsigned int iteration_number_;
-
-  /**
-   * @brief Print solution info at every n iteration
-   */
-  unsigned int print_every_;
-
-  double r_rrt_;
-  double rewire_factor_;
-  double max_distance_;
-  double goal_radius_;
-  unsigned int update_goal_every_;
-  std::vector<std::shared_ptr<Vertex>> x_soln_;
-
   unsigned int informed_dims_;
+
+  /**
+   * @brief Maximum number of tries to sample on prolate hyperellipsoid
+   */
   unsigned int max_sampling_tries_;
 
   Eigen::VectorXd x_start_focus_;  // start focal point
@@ -257,9 +185,8 @@ class InformedRRTStar : public BasePlanner {
   double ellipse_orien_2d_;                // orientation of the ellipse
   std::vector<double> ellipse_center_2d_;  // center point of the ellipse
 
-  double current_measure_;
-  Eigen::MatrixXd rotation_world_from_ellipse_;
-  Eigen::MatrixXd transformation_world_from_ellipse_;
+  Eigen::MatrixXd rotation_world_from_ellipse_;        // rotation matrix
+  Eigen::MatrixXd transformation_world_from_ellipse_;  // transformation matrix
 
  public:
   using gen_type = std::mt19937;

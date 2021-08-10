@@ -29,10 +29,13 @@ namespace psrr_planner {
 BasePlanner::BasePlanner(
     const StateLimits& state_limits,
     std::shared_ptr<GridCollisionChecker> collision_checker,
-    double interpolation_dist, bool use_seed, unsigned int seed_number)
+    double interpolation_dist, double goal_radius, unsigned int max_iterations,
+    bool use_seed, unsigned int seed_number)
     : state_limits_{state_limits},
       collision_checker_{collision_checker},
       interpolation_dist_{interpolation_dist},
+      goal_radius_{goal_radius},
+      max_iterations_{max_iterations},
       use_seed_{use_seed},
       seed_number_{seed_number},
       solution_found_{false} {
@@ -66,6 +69,16 @@ BasePlanner::BasePlanner(
 }
 
 BasePlanner::~BasePlanner() {}
+
+double BasePlanner::getSolutionCost() {
+  double total_cost = 0.0;
+  std::shared_ptr<Vertex> current = goal_vertex_;
+  while (current->parent && current != start_vertex_) {
+    total_cost += distance(current, current->parent);
+    current = current->parent;
+  }
+  return total_cost;
+}
 
 double BasePlanner::distance(const std::shared_ptr<const Vertex>& v1,
                              const std::shared_ptr<const Vertex>& v2) {
@@ -179,5 +192,98 @@ bool BasePlanner::isCollision(const std::shared_ptr<const Vertex>& from_v,
   }
 
   return false;
+}
+
+void BasePlanner::sample(const std::shared_ptr<Vertex>& v) {
+  if (!use_seed_) {
+    std::random_device rd;
+    rn_gen_ = std::mt19937(rd());
+  }
+  v->state.x = x_dis_(rn_gen_);
+  v->state.y = y_dis_(rn_gen_);
+  v->state.theta = theta_dis_(rn_gen_);
+
+  v->state.joint_pos.resize(joint_pos_dis_.size());
+  for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
+    v->state.joint_pos[i] = joint_pos_dis_[i](rn_gen_);
+  }
+}
+
+void BasePlanner::nearest(const std::shared_ptr<const Vertex>& x_rand,
+                          std::shared_ptr<Vertex>& x_near) {
+  double minDist = std::numeric_limits<double>::infinity();
+
+  for (const auto& v : vertices_) {
+    double dist = distance(v, x_rand);
+    if (dist < minDist) {
+      minDist = dist;
+      x_near = v;
+    }
+  }
+}
+
+bool BasePlanner::inGoalRegion(const std::shared_ptr<const Vertex>& v) {
+  if (distance(v, goal_vertex_) <= goal_radius_) return true;
+  return false;
+}
+
+double BasePlanner::cost(std::shared_ptr<Vertex> v) {
+  std::shared_ptr<Vertex> curr_p = std::move(v);
+  double cost = 0.0;
+  while (curr_p->parent) {
+    cost += distance(curr_p, curr_p->parent);
+    curr_p = curr_p->parent;
+  }
+  return cost;
+}
+
+double BasePlanner::euclideanCost(std::shared_ptr<Vertex> v) {
+  std::shared_ptr<Vertex> curr_p = std::move(v);
+  double cost = 0.0;
+  while (curr_p->parent) {
+    cost += euclideanDistance(curr_p, curr_p->parent);
+    curr_p = curr_p->parent;
+  }
+  return cost;
+}
+
+double BasePlanner::euclideanCost2D(std::shared_ptr<Vertex> v) {
+  std::shared_ptr<Vertex> curr_p = std::move(v);
+  double cost = 0.0;
+  while (curr_p->parent) {
+    cost += euclideanDistance2D(curr_p, curr_p->parent);
+    curr_p = curr_p->parent;
+  }
+  return cost;
+}
+
+double BasePlanner::euclideanDistance(const std::shared_ptr<const Vertex>& v1,
+                                      const std::shared_ptr<const Vertex>& v2) {
+  double total_dist = 0.0;
+
+  // calculate distance in R^n state space
+  total_dist += (v1->state.x - v2->state.x) * (v1->state.x - v2->state.x) +
+                (v1->state.y - v2->state.y) * (v1->state.y - v2->state.y);
+
+  for (std::size_t i = 0; i < v1->state.joint_pos.size(); ++i) {
+    total_dist += (v1->state.joint_pos[i] - v2->state.joint_pos[i]) *
+                  (v1->state.joint_pos[i] - v2->state.joint_pos[i]);
+  }
+
+  total_dist = std::sqrt(total_dist);
+  return total_dist;
+}
+
+double BasePlanner::euclideanDistance2D(
+    const std::shared_ptr<const Vertex>& v1,
+    const std::shared_ptr<const Vertex>& v2) {
+  double total_dist = 0.0;
+
+  // calculate distance in R^2 state space
+  total_dist += (v1->state.x - v2->state.x) * (v1->state.x - v2->state.x) +
+                (v1->state.y - v2->state.y) * (v1->state.y - v2->state.y);
+
+  total_dist = std::sqrt(total_dist);
+  return total_dist;
 }
 }  // namespace psrr_planner

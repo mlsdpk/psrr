@@ -203,14 +203,15 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         ROS_INFO("Planner Type: rrt");
         // we need to check planner specific parameters are given
         if (private_nh_.hasParam("rrt/max_iterations") &&
-            private_nh_.hasParam("rrt/delta_q") &&
+            private_nh_.hasParam("rrt/max_distance") &&
             private_nh_.hasParam("rrt/interpolation_dist") &&
             private_nh_.hasParam("rrt/goal_radius")) {
           int max_iterations;
-          double delta_q, interpolation_dist, goal_radius;
+          double max_distance, interpolation_dist, goal_radius;
           private_nh_.param<int>("rrt/max_iterations", max_iterations,
                                  max_iterations);
-          private_nh_.param<double>("rrt/delta_q", delta_q, delta_q);
+          private_nh_.param<double>("rrt/max_distance", max_distance,
+                                    max_distance);
           private_nh_.param<double>("rrt/interpolation_dist",
                                     interpolation_dist, interpolation_dist);
           private_nh_.param<double>("rrt/goal_radius", goal_radius,
@@ -239,9 +240,9 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           }
 
           // create rrt planner
-          planner_.reset(new RRT(state_limits, collision_checker_,
-                                 max_iterations, delta_q, interpolation_dist,
-                                 goal_radius, use_seed, seed_number));
+          planner_.reset(new RRT(
+              state_limits, collision_checker_, max_iterations, max_distance,
+              interpolation_dist, goal_radius, use_seed, seed_number));
         } else {
           ROS_ERROR("RRT specific parameters not found.");
           return;
@@ -252,21 +253,21 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         ROS_INFO("Planner Type: rrt_star");
         // we need to check planner specific parameters are given
         if (private_nh_.hasParam("rrt_star/max_iterations") &&
-            private_nh_.hasParam("rrt_star/goal_parent_size_interval") &&
+            private_nh_.hasParam("rrt_star/update_goal_every") &&
             private_nh_.hasParam("rrt_star/max_distance") &&
-            private_nh_.hasParam("rrt_star/r_rrt") &&
+            private_nh_.hasParam("rrt_star/rewire_factor") &&
             private_nh_.hasParam("rrt_star/interpolation_dist") &&
             private_nh_.hasParam("rrt_star/goal_radius")) {
-          int max_iterations, goal_parent_size_interval;
-          double max_distance, r_rrt, interpolation_dist, goal_radius;
+          int max_iterations, update_goal_every;
+          double max_distance, rewire_factor, interpolation_dist, goal_radius;
           private_nh_.param<int>("rrt_star/max_iterations", max_iterations,
                                  max_iterations);
-          private_nh_.param<int>("rrt_star/goal_parent_size_interval",
-                                 goal_parent_size_interval,
-                                 goal_parent_size_interval);
+          private_nh_.param<int>("rrt_star/update_goal_every",
+                                 update_goal_every, update_goal_every);
           private_nh_.param<double>("rrt_star/max_distance", max_distance,
                                     max_distance);
-          private_nh_.param<double>("rrt_star/r_rrt", r_rrt, r_rrt);
+          private_nh_.param<double>("rrt_star/rewire_factor", rewire_factor,
+                                    rewire_factor);
           private_nh_.param<double>("rrt_star/interpolation_dist",
                                     interpolation_dist, interpolation_dist);
           private_nh_.param<double>("rrt_star/goal_radius", goal_radius,
@@ -301,10 +302,10 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
 
           // create rrt-star planner
           planner_.reset(new RRTStar(state_limits, collision_checker_,
-                                     max_iterations, goal_parent_size_interval,
-                                     max_distance, r_rrt, interpolation_dist,
-                                     goal_radius, use_seed, seed_number,
-                                     print_every));
+                                     max_iterations, update_goal_every,
+                                     max_distance, rewire_factor,
+                                     interpolation_dist, goal_radius, use_seed,
+                                     seed_number, print_every));
         } else {
           ROS_ERROR("RRT specific parameters not found.");
           return;
@@ -383,7 +384,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         return;
       }
     } else {
-      ROS_ERROR("No planner type found. Make sure planner_type_ is set.");
+      ROS_ERROR("No planner type found. Make sure planner_type is set.");
       return;
     }
 

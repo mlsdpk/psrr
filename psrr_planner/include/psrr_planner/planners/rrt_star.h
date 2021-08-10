@@ -38,10 +38,9 @@ class RRTStar : public BasePlanner {
    * @param state_limits The state space of the robot including limits
    * @param collision_checker Grid Collision Checker
    * @param max_iterations Maximum number of iterations to run the algorithm
-   * @param goal_parent_size_interval Only find parent of goal vertex for fix
-   * amount of vertices interval
+   * @param update_goal_every Find best goal parent at every n iteration
    * @param max_distance Maximum distance allowed between two vertices
-   * @param r_rrt Rewiring factor
+   * @param rewire_factor Rewiring factor
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
    * @param use_seed Either use seeding or not (default: false)
@@ -50,8 +49,8 @@ class RRTStar : public BasePlanner {
    */
   RRTStar(const StateLimits& state_limits,
           std::shared_ptr<GridCollisionChecker> collision_checker,
-          unsigned int max_iterations, unsigned int goal_parent_size_interval,
-          double max_distance, double r_rrt, double interpolation_dist,
+          unsigned int max_iterations, unsigned int update_goal_every,
+          double max_distance, double rewire_factor, double interpolation_dist,
           double goal_radius, bool use_seed = false,
           unsigned int seed_number = 0, unsigned int print_every = 0);
 
@@ -74,27 +73,7 @@ class RRTStar : public BasePlanner {
    */
   void update() override;
 
-  /**
-   * @brief Function for finding the solution and calculating the path cost
-   * @return Solution cost
-   */
-  double getSolutionCost() override;
-
- private:
-  /**
-   * @brief Randomly sample a n-dimensional state limited by min and max of each
-   * state variables
-   * @param v Sampled vertex
-   */
-  void sampleFree(const std::shared_ptr<Vertex>& v);
-
-  /**
-   * @brief Find the nearest neighbour in a tree
-   * @param v Nearest vertex
-   */
-  void nearest(const std::shared_ptr<const Vertex>& x_rand,
-               std::shared_ptr<Vertex>& x_near);
-
+ protected:
   /**
    * @brief Find all the nearest neighbours inside the radius of particular
    * vertex provided
@@ -104,27 +83,45 @@ class RRTStar : public BasePlanner {
   void near(const std::shared_ptr<const Vertex>& x_new,
             std::vector<std::shared_ptr<Vertex>>& X_near);
 
-  double cost(std::shared_ptr<Vertex> v);
-
   /**
-   * @brief Maximum number of iterations to run the algorithm
+   * @brief Calculate r_rrt_ based on current measure
    */
-  unsigned int max_iterations_;
-
-  /**
-   * @brief Iteration number to keep track
-   */
-  unsigned int iteration_number_;
+  void updateRewiringLowerBounds();
 
   /**
    * @brief Print solution info at every n iteration
    */
   unsigned int print_every_;
 
-  unsigned int goal_parent_size_interval_;
+  /**
+   * @brief Find best goal parent at every n iteration
+   */
+  unsigned int update_goal_every_;
+
+  /**
+   * @brief Rewiring lower bound constant
+   */
   double r_rrt_;
+
+  /**
+   * @brief Rewiring factor
+   */
+  double rewire_factor_;
+
+  /**
+   * @brief Maximum distance allowed between two vertices
+   */
   double max_distance_;
-  double goal_radius_;
+
+  /**
+   * @brief Measure (i.e., n-dimensional volume) of the current state space
+   */
+  double current_measure_;
+
+  /**
+   * @brief Vertices that lie within the goal radius
+   */
+  std::vector<std::shared_ptr<Vertex>> x_soln_;
 };
 
 }  // namespace psrr_planner

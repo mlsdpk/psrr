@@ -28,18 +28,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace psrr_planner {
 RRTStar::RRTStar(const StateLimits& state_limits,
                  std::shared_ptr<GridCollisionChecker> collision_checker,
-                 unsigned int max_iterations,
-                 unsigned int goal_parent_size_interval, double max_distance,
-                 double r_rrt, double interpolation_dist, double goal_radius,
-                 bool use_seed, unsigned int seed_number,
-                 unsigned int print_every)
-    : BasePlanner(state_limits, collision_checker, interpolation_dist, use_seed,
-                  seed_number),
-      max_iterations_{max_iterations},
-      goal_parent_size_interval_{goal_parent_size_interval},
+                 unsigned int max_iterations, unsigned int update_goal_every,
+                 double max_distance, double rewire_factor,
+                 double interpolation_dist, double goal_radius, bool use_seed,
+                 unsigned int seed_number, unsigned int print_every)
+    : BasePlanner(state_limits, collision_checker, interpolation_dist,
+                  goal_radius, max_iterations, use_seed, seed_number),
+      update_goal_every_{update_goal_every},
       max_distance_{max_distance},
-      r_rrt_{r_rrt},
-      goal_radius_{goal_radius},
+      rewire_factor_{rewire_factor},
       print_every_{print_every} {}
 
 RRTStar::~RRTStar(){};
@@ -54,38 +51,15 @@ void RRTStar::init(const Vertex& start, const Vertex& goal) {
   start_vertex_->state = start.state;
   goal_vertex_->state = goal.state;
 
+  // update the current measure to problem space
+  current_measure_ = problemMeasure(state_limits_);
+  // now update rewiring lower bounds with current updated measure
+  updateRewiringLowerBounds();
+
   vertices_.clear();
   edges_.clear();
-
+  x_soln_.clear();
   vertices_.emplace_back(start_vertex_);
-}
-
-void RRTStar::sampleFree(const std::shared_ptr<Vertex>& v) {
-  if (!use_seed_) {
-    std::random_device rd;
-    rn_gen_ = std::mt19937(rd());
-  }
-  v->state.x = x_dis_(rn_gen_);
-  v->state.y = y_dis_(rn_gen_);
-  v->state.theta = theta_dis_(rn_gen_);
-
-  v->state.joint_pos.resize(joint_pos_dis_.size());
-  for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
-    v->state.joint_pos[i] = joint_pos_dis_[i](rn_gen_);
-  }
-}
-
-void RRTStar::nearest(const std::shared_ptr<const Vertex>& x_rand,
-                      std::shared_ptr<Vertex>& x_near) {
-  double minDist = std::numeric_limits<double>::infinity();
-
-  for (const auto& v : vertices_) {
-    double dist = distance(v, x_rand);
-    if (dist < minDist) {
-      minDist = dist;
-      x_near = v;
-    }
-  }
 }
 
 void RRTStar::near(const std::shared_ptr<const Vertex>& x_new,
@@ -103,14 +77,13 @@ void RRTStar::near(const std::shared_ptr<const Vertex>& x_new,
   }
 }
 
-double RRTStar::cost(std::shared_ptr<Vertex> v) {
-  std::shared_ptr<Vertex> curr_p = std::move(v);
-  double cost = 0.0;
-  while (curr_p->parent) {
-    cost += distance(curr_p, curr_p->parent);
-    curr_p = curr_p->parent;
-  }
-  return cost;
+void RRTStar::updateRewiringLowerBounds() {
+  // r_rrt > (2*(1+1/d))^(1/d)*(measure/ballvolume)^(1/d)
+  r_rrt_ =
+      rewire_factor_ *
+      std::pow(2 * (1.0 + 1.0 / static_cast<double>(state_dimensions_)) *
+                   (current_measure_ / unitNBallMeasure(state_dimensions_)),
+               1.0 / static_cast<double>(state_dimensions_));
 }
 
 void RRTStar::update() {
@@ -121,7 +94,7 @@ void RRTStar::update() {
     std::shared_ptr<Vertex> x_nearest = std::make_shared<Vertex>();
     std::shared_ptr<Vertex> x_new = std::make_shared<Vertex>();
 
-    sampleFree(x_rand);
+    sample(x_rand);
     nearest(x_rand, x_nearest);
 
     // find the distance between x_rand and x_nearest
@@ -168,30 +141,27 @@ void RRTStar::update() {
           }
         }
       }
+
+      // add into x_soln if the vertex is within the goal radius
+      if (inGoalRegion(x_new)) {
+        x_soln_.emplace_back(x_new);
+      }
     }
 
-    // only find best parent of goal vertex for fix amount of time
-    if (vertices_.size() % goal_parent_size_interval_ == 0) {
-      // find nearest vertices
-      std::vector<std::shared_ptr<Vertex>> nearest_vertices;
-      for (const auto& v : vertices_) {
-        double dist = distance(v, goal_vertex_);
-        if (dist < goal_radius_) {
-          nearest_vertices.emplace_back(v);
-        }
-      }
+    // update the best parent for the goal vertex every n iterations
+    if (iteration_number_ % update_goal_every_ == 0) {
+      if (x_soln_.size() > 0) {
+        std::shared_ptr<Vertex> best_goal_parent;
+        double min_goal_parent_cost = std::numeric_limits<double>::infinity();
 
-      if (nearest_vertices.size() > 0) {
-        std::shared_ptr<Vertex> bestVertex;
-        double bestCost = std::numeric_limits<double>::infinity();
-        for (const auto& v : nearest_vertices) {
+        for (const auto& v : x_soln_) {
           double c = cost(v);
-          if (c < bestCost) {
-            bestCost = c;
-            bestVertex = v;
+          if (c < min_goal_parent_cost) {
+            min_goal_parent_cost = c;
+            best_goal_parent = v;
           }
         }
-        goal_vertex_->parent = bestVertex;
+        goal_vertex_->parent = best_goal_parent;
         solution_found_ = true;
       }
     }
@@ -214,13 +184,4 @@ void RRTStar::update() {
   }
 }
 
-double RRTStar::getSolutionCost() {
-  double total_cost = 0.0;
-  std::shared_ptr<Vertex> current = goal_vertex_;
-  while (current->parent && current != start_vertex_) {
-    total_cost += distance(current, current->parent);
-    current = current->parent;
-  }
-  return total_cost;
-}
 }  // namespace psrr_planner
