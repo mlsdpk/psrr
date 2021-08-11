@@ -41,13 +41,14 @@ class BasePlanner {
    * @param collision_checker Grid Collision Checker
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
+   * @param goal_bias Goal biased sampling percentage
    * @param max_iterations Maximum number of iterations to run the algorithm
    * @param use_seed Either use seeding or not (default: false)
    * @param seed_number Seed number to be used if use_seed is true. (default: 0)
    */
   BasePlanner(const StateLimits& state_limits,
               std::shared_ptr<GridCollisionChecker> collision_checker,
-              double interpolation_dist, double goal_radius,
+              double interpolation_dist, double goal_radius, double goal_bias,
               unsigned int max_iterations, bool use_seed = false,
               unsigned int seed_number = 0);
 
@@ -254,6 +255,11 @@ class BasePlanner {
    * @brief Distance between vertex and goal to stop planning
    */
   double goal_radius_;
+
+  /**
+   * @brief Goal biased sampling percentage
+   */
+  double goal_bias_;
 
   /**
    * @brief Total number of dimensions of problem state space

@@ -41,14 +41,15 @@ class RRT : public BasePlanner {
    * @param max_distance Maximum distance allowed between two vertices
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
+   * @param goal_bias Goal biased sampling percentage
    * @param use_seed Either use seeding or not (default: false)
    * @param seed_number Seed number to be used if use_seed is true. (default: 0)
    */
   RRT(const StateLimits& state_limits,
       std::shared_ptr<GridCollisionChecker> collision_checker,
       unsigned int max_iterations, double max_distance,
-      double interpolation_dist, double goal_radius, bool use_seed = false,
-      unsigned int seed_number = 0);
+      double interpolation_dist, double goal_radius, double goal_bias,
+      bool use_seed = false, unsigned int seed_number = 0);
 
   /**
    * @brief A destructor for psrr_planner::RRT

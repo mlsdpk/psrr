@@ -226,9 +226,10 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         if (private_nh_.hasParam("rrt/max_iterations") &&
             private_nh_.hasParam("rrt/max_distance") &&
             private_nh_.hasParam("rrt/interpolation_dist") &&
-            private_nh_.hasParam("rrt/goal_radius")) {
+            private_nh_.hasParam("rrt/goal_radius") &&
+            private_nh_.hasParam("rrt/goal_bias")) {
           int max_iterations;
-          double max_distance, interpolation_dist, goal_radius;
+          double max_distance, interpolation_dist, goal_radius, goal_bias;
           private_nh_.param<int>("rrt/max_iterations", max_iterations,
                                  max_iterations);
           private_nh_.param<double>("rrt/max_distance", max_distance,
@@ -237,11 +238,13 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                                     interpolation_dist, interpolation_dist);
           private_nh_.param<double>("rrt/goal_radius", goal_radius,
                                     goal_radius);
+          private_nh_.param<double>("rrt/goal_bias", goal_bias, goal_bias);
 
           // create rrt planner
-          planner_.reset(new RRT(
-              state_limits, collision_checker_, max_iterations, max_distance,
-              interpolation_dist, goal_radius, use_seed, seed_number));
+          planner_.reset(new RRT(state_limits, collision_checker_,
+                                 max_iterations, max_distance,
+                                 interpolation_dist, goal_radius, goal_bias,
+                                 use_seed, seed_number));
         } else {
           ROS_ERROR("RRT specific parameters not found.");
           return;
@@ -256,9 +259,11 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
             private_nh_.hasParam("rrt_star/max_distance") &&
             private_nh_.hasParam("rrt_star/rewire_factor") &&
             private_nh_.hasParam("rrt_star/interpolation_dist") &&
-            private_nh_.hasParam("rrt_star/goal_radius")) {
+            private_nh_.hasParam("rrt_star/goal_radius") &&
+            private_nh_.hasParam("rrt_star/goal_bias")) {
           int max_iterations, update_goal_every;
-          double max_distance, rewire_factor, interpolation_dist, goal_radius;
+          double max_distance, rewire_factor, interpolation_dist, goal_radius,
+              goal_bias;
           private_nh_.param<int>("rrt_star/max_iterations", max_iterations,
                                  max_iterations);
           private_nh_.param<int>("rrt_star/update_goal_every",
@@ -271,6 +276,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                                     interpolation_dist, interpolation_dist);
           private_nh_.param<double>("rrt_star/goal_radius", goal_radius,
                                     goal_radius);
+          private_nh_.param<double>("rrt_star/goal_bias", goal_bias, goal_bias);
 
           int print_every = 0;
           private_nh_.param<int>("rrt_star/print_every", print_every,
@@ -280,8 +286,8 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           planner_.reset(new RRTStar(state_limits, collision_checker_,
                                      max_iterations, update_goal_every,
                                      max_distance, rewire_factor,
-                                     interpolation_dist, goal_radius, use_seed,
-                                     seed_number, print_every));
+                                     interpolation_dist, goal_radius, goal_bias,
+                                     use_seed, seed_number, print_every));
         } else {
           ROS_ERROR("RRT specific parameters not found.");
           return;
@@ -296,10 +302,12 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
             private_nh_.hasParam("informed_rrt_star/rewire_factor") &&
             private_nh_.hasParam("informed_rrt_star/interpolation_dist") &&
             private_nh_.hasParam("informed_rrt_star/goal_radius") &&
+            private_nh_.hasParam("informed_rrt_star/goal_bias") &&
             private_nh_.hasParam("informed_rrt_star/use_greedy_informed_set") &&
             private_nh_.hasParam("informed_rrt_star/update_goal_every")) {
           int max_iterations, max_sampling_tries, update_goal_every;
-          double max_distance, rewire_factor, interpolation_dist, goal_radius;
+          double max_distance, rewire_factor, interpolation_dist, goal_radius,
+              goal_bias;
           bool use_greedy_informed_set = false;
           private_nh_.param<int>("informed_rrt_star/max_iterations",
                                  max_iterations, max_iterations);
@@ -313,6 +321,8 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                                     interpolation_dist, interpolation_dist);
           private_nh_.param<double>("informed_rrt_star/goal_radius",
                                     goal_radius, goal_radius);
+          private_nh_.param<double>("informed_rrt_star/goal_bias", goal_bias,
+                                    goal_bias);
           private_nh_.param<bool>("informed_rrt_star/use_greedy_informed_set",
                                   use_greedy_informed_set,
                                   use_greedy_informed_set);
@@ -327,7 +337,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
           planner_.reset(new InformedRRTStar(
               state_limits, collision_checker_, max_iterations,
               max_sampling_tries, max_distance, rewire_factor,
-              interpolation_dist, goal_radius, update_goal_every,
+              interpolation_dist, goal_radius, goal_bias, update_goal_every,
               use_greedy_informed_set, use_seed, seed_number, print_every));
         } else {
           ROS_ERROR("Informed RRT* specific parameters not found.");

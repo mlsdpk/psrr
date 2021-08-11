@@ -29,10 +29,11 @@ namespace psrr_planner {
 RRT::RRT(const StateLimits& state_limits,
          std::shared_ptr<GridCollisionChecker> collision_checker,
          unsigned int max_iterations, double max_distance,
-         double interpolation_dist, double goal_radius, bool use_seed,
-         unsigned int seed_number)
+         double interpolation_dist, double goal_radius, double goal_bias,
+         bool use_seed, unsigned int seed_number)
     : BasePlanner(state_limits, collision_checker, interpolation_dist,
-                  goal_radius, max_iterations, use_seed, seed_number),
+                  goal_radius, goal_bias, max_iterations, use_seed,
+                  seed_number),
 
       max_distance_{max_distance} {}
 

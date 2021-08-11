@@ -31,12 +31,12 @@ InformedRRTStar::InformedRRTStar(
     std::shared_ptr<GridCollisionChecker> collision_checker,
     unsigned int max_iterations, unsigned int max_sampling_tries,
     double max_distance, double rewire_factor, double interpolation_dist,
-    double goal_radius, unsigned int update_goal_every,
+    double goal_radius, double goal_bias, unsigned int update_goal_every,
     bool use_greedy_informed_set, bool use_seed, unsigned int seed_number,
     unsigned int print_every)
     : RRTStar(state_limits, collision_checker, max_iterations,
               update_goal_every, max_distance, rewire_factor,
-              interpolation_dist, goal_radius, use_seed, seed_number,
+              interpolation_dist, goal_radius, goal_bias, use_seed, seed_number,
               print_every),
       max_sampling_tries_{max_sampling_tries},
       use_greedy_informed_set_{use_greedy_informed_set} {}
@@ -204,78 +204,94 @@ void InformedRRTStar::sample(const std::shared_ptr<Vertex>& v) {
     std::random_device rd;
     rn_gen_ = std::mt19937(rd());
   }
-  // sample on the hyperellipsoid
-  if (c_i_ < std::numeric_limits<double>::infinity()) {
-    unsigned int iter = 0;
-    bool found_informed_sample = false;
-    while (iter < max_sampling_tries_) {
-      iter++;
 
-      // The spherical point as a std::vector
-      std::vector<double> sphere(informed_dims_);
+  // goal biasing distribution
+  std::uniform_real_distribution<double> dis(0.0, 1.0);
+  if (dis(rn_gen_) > goal_bias_) {
+    // sample on the hyperellipsoid
+    if (c_i_ < std::numeric_limits<double>::infinity()) {
+      unsigned int iter = 0;
+      bool found_informed_sample = false;
+      while (iter < max_sampling_tries_) {
+        iter++;
 
-      // Get a random point in the sphere
-      uniformInBall(1.0, sphere);
+        // The spherical point as a std::vector
+        std::vector<double> sphere(informed_dims_);
 
-      // now we need to transform this point to the prolate hyperspheroid
-      // update transformation matrix first
-      updateTransformationMatrix();
+        // Get a random point in the sphere
+        uniformInBall(1.0, sphere);
 
-      std::vector<double> informed_state(informed_dims_);
-      Eigen::Map<Eigen::VectorXd>(&informed_state[0], informed_dims_) =
-          transformation_world_from_ellipse_ *
-          Eigen::Map<const Eigen::VectorXd>(&sphere[0], informed_dims_);
-      Eigen::Map<Eigen::VectorXd>(&informed_state[0], informed_dims_) +=
-          x_center_;
+        // now we need to transform this point to the prolate hyperspheroid
+        // update transformation matrix first
+        updateTransformationMatrix();
 
-      // make sure sampled informed state satisfies bounds
-      // check x
-      if (!(informed_state[0] >= state_limits_.min_x &&
-            informed_state[0] <= state_limits_.max_x))
-        continue;
-      // check y
-      if (!(informed_state[1] >= state_limits_.min_y &&
-            informed_state[1] <= state_limits_.max_y))
-        continue;
+        std::vector<double> informed_state(informed_dims_);
+        Eigen::Map<Eigen::VectorXd>(&informed_state[0], informed_dims_) =
+            transformation_world_from_ellipse_ *
+            Eigen::Map<const Eigen::VectorXd>(&sphere[0], informed_dims_);
+        Eigen::Map<Eigen::VectorXd>(&informed_state[0], informed_dims_) +=
+            x_center_;
 
-      // check joint pos
-      bool is_joints_satisfied = true;
-      for (std::size_t i = 0; i < state_limits_.min_joint_pos.size(); ++i) {
-        if (!(informed_state[i + 2] >= state_limits_.min_joint_pos[i] &&
-              informed_state[i + 2] <= state_limits_.max_joint_pos[i]))
-          is_joints_satisfied = false;
+        // make sure sampled informed state satisfies bounds
+        // check x
+        if (!(informed_state[0] >= state_limits_.min_x &&
+              informed_state[0] <= state_limits_.max_x))
+          continue;
+        // check y
+        if (!(informed_state[1] >= state_limits_.min_y &&
+              informed_state[1] <= state_limits_.max_y))
+          continue;
+
+        // check joint pos
+        bool is_joints_satisfied = true;
+        for (std::size_t i = 0; i < state_limits_.min_joint_pos.size(); ++i) {
+          if (!(informed_state[i + 2] >= state_limits_.min_joint_pos[i] &&
+                informed_state[i + 2] <= state_limits_.max_joint_pos[i]))
+            is_joints_satisfied = false;
+        }
+        if (!is_joints_satisfied) continue;
+
+        // this means informed sampled state satisfies all the limits
+        // now we create sampled vertex
+        // make sure SO(n) component is sampled and added into the sampled
+        // vertex
+        v->state.x = informed_state[0];
+        v->state.y = informed_state[1];
+        v->state.theta = theta_dis_(rn_gen_);
+        v->state.joint_pos.resize(joint_pos_dis_.size());
+        for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
+          v->state.joint_pos[i] = informed_state[i + 2];
+        }
+        found_informed_sample = true;
+        break;
       }
-      if (!is_joints_satisfied) continue;
 
-      // this means informed sampled state satisfies all the limits
-      // now we create sampled vertex
-      // make sure SO(n) component is sampled and added into the sampled vertex
-      v->state.x = informed_state[0];
-      v->state.y = informed_state[1];
-      v->state.theta = theta_dis_(rn_gen_);
-      v->state.joint_pos.resize(joint_pos_dis_.size());
-      for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
-        v->state.joint_pos[i] = informed_state[i + 2];
+      // if informed sample is not found with maximum number of tries
+      // we just sample on the whole problem space, otherwise return
+      if (found_informed_sample) {
+        return;
       }
-      found_informed_sample = true;
-      break;
     }
 
-    // if informed sample is not found with maximum number of tries
-    // we just sample on the whole problem space, otherwise return
-    if (found_informed_sample) {
-      return;
+    // sample problem with state limits
+    v->state.x = x_dis_(rn_gen_);
+    v->state.y = y_dis_(rn_gen_);
+    v->state.theta = theta_dis_(rn_gen_);
+
+    v->state.joint_pos.resize(joint_pos_dis_.size());
+    for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
+      v->state.joint_pos[i] = joint_pos_dis_[i](rn_gen_);
     }
-  }
+  } else {
+    // otherwise, sampled at goal vertex
+    v->state.x = goal_vertex_->state.x;
+    v->state.y = goal_vertex_->state.y;
+    v->state.theta = goal_vertex_->state.theta;
 
-  // sample problem with state limits
-  v->state.x = x_dis_(rn_gen_);
-  v->state.y = y_dis_(rn_gen_);
-  v->state.theta = theta_dis_(rn_gen_);
-
-  v->state.joint_pos.resize(joint_pos_dis_.size());
-  for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
-    v->state.joint_pos[i] = joint_pos_dis_[i](rn_gen_);
+    v->state.joint_pos.resize(joint_pos_dis_.size());
+    for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
+      v->state.joint_pos[i] = goal_vertex_->state.joint_pos[i];
+    }
   }
 }
 

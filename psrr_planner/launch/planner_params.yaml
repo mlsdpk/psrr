@@ -58,6 +58,9 @@ rrt:
 
   # distance between vertex and goal to stop planning
   goal_radius: 1.1
+
+  # Goal biased sampling percentage [0-1]
+  goal_bias: 0.1
 #################
 
 ##################
@@ -78,6 +81,9 @@ rrt_star:
 
   # distance between vertex and goal to stop planning
   goal_radius: 1.8
+
+  # Goal biased sampling percentage [0-1]
+  goal_bias: 0.1
 
   # update goal parent at every nth iteration number
   update_goal_every: 1000
@@ -107,6 +113,9 @@ informed_rrt_star:
 
   # distance between vertex and goal to stop planning
   goal_radius: 1.8
+
+  # Goal biased sampling percentage [0-1]
+  goal_bias: 0.1
 
   # Whether to use greedy informed set or not
   use_greedy_informed_set: true

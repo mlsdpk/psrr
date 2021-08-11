@@ -50,6 +50,7 @@ class InformedRRTStar : public RRTStar {
    * @param rewire_factor Rewiring factor
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
+   * @param goal_bias Goal biased sampling percentage
    * @param update_goal_every Find best goal parent at every n iteration
    * @param use_greedy_informed_set Whether use greedy informed set or not
    * (default: false)
@@ -62,7 +63,7 @@ class InformedRRTStar : public RRTStar {
                   unsigned int max_iterations, unsigned int max_sampling_tries,
                   double max_distance, double rewire_factor,
                   double interpolation_dist, double goal_radius,
-                  unsigned int update_goal_every,
+                  double goal_bias, unsigned int update_goal_every,
                   bool use_greedy_informed_set = false, bool use_seed = false,
                   unsigned int seed_number = 0, unsigned int print_every = 0);
 

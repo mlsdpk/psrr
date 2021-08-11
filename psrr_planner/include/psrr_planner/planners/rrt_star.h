@@ -43,6 +43,7 @@ class RRTStar : public BasePlanner {
    * @param rewire_factor Rewiring factor
    * @param interpolation_dist Interpolation distance during collsion checking
    * @param goal_radius Distance between vertex and goal to stop planning
+   * @param goal_bias Goal biased sampling percentage
    * @param use_seed Either use seeding or not (default: false)
    * @param seed_number Seed number to be used if use_seed is true. (default: 0)
    * @param print_every Print solution info at every n iteration (default: 0)
@@ -51,7 +52,7 @@ class RRTStar : public BasePlanner {
           std::shared_ptr<GridCollisionChecker> collision_checker,
           unsigned int max_iterations, unsigned int update_goal_every,
           double max_distance, double rewire_factor, double interpolation_dist,
-          double goal_radius, bool use_seed = false,
+          double goal_radius, double goal_bias, bool use_seed = false,
           unsigned int seed_number = 0, unsigned int print_every = 0);
 
   /**

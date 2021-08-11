@@ -29,12 +29,13 @@ namespace psrr_planner {
 BasePlanner::BasePlanner(
     const StateLimits& state_limits,
     std::shared_ptr<GridCollisionChecker> collision_checker,
-    double interpolation_dist, double goal_radius, unsigned int max_iterations,
-    bool use_seed, unsigned int seed_number)
+    double interpolation_dist, double goal_radius, double goal_bias,
+    unsigned int max_iterations, bool use_seed, unsigned int seed_number)
     : state_limits_{state_limits},
       collision_checker_{collision_checker},
       interpolation_dist_{interpolation_dist},
       goal_radius_{goal_radius},
+      goal_bias_{goal_bias},
       max_iterations_{max_iterations},
       use_seed_{use_seed},
       seed_number_{seed_number},
@@ -199,13 +200,28 @@ void BasePlanner::sample(const std::shared_ptr<Vertex>& v) {
     std::random_device rd;
     rn_gen_ = std::mt19937(rd());
   }
-  v->state.x = x_dis_(rn_gen_);
-  v->state.y = y_dis_(rn_gen_);
-  v->state.theta = theta_dis_(rn_gen_);
 
-  v->state.joint_pos.resize(joint_pos_dis_.size());
-  for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
-    v->state.joint_pos[i] = joint_pos_dis_[i](rn_gen_);
+  std::uniform_real_distribution<double> dis(0.0, 1.0);
+
+  if (dis(rn_gen_) > goal_bias_) {
+    v->state.x = x_dis_(rn_gen_);
+    v->state.y = y_dis_(rn_gen_);
+    v->state.theta = theta_dis_(rn_gen_);
+
+    v->state.joint_pos.resize(joint_pos_dis_.size());
+    for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
+      v->state.joint_pos[i] = joint_pos_dis_[i](rn_gen_);
+    }
+  } else {
+    // otherwise, sampled at goal vertex
+    v->state.x = goal_vertex_->state.x;
+    v->state.y = goal_vertex_->state.y;
+    v->state.theta = goal_vertex_->state.theta;
+
+    v->state.joint_pos.resize(joint_pos_dis_.size());
+    for (std::size_t i = 0; i < joint_pos_dis_.size(); ++i) {
+      v->state.joint_pos[i] = goal_vertex_->state.joint_pos[i];
+    }
   }
 }
 
