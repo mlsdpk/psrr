@@ -35,8 +35,18 @@ initial_joint_pos: [0.6, 0.6]
 
 planner_type: informed_rrt_star
 
+# planning in time
+use_planning_time: true
+
+# planning time in seconds
+planning_time: 30
+
+# maximum number of iterations to run the algorithm
+# if use_planning_time is true, max_iterations is not used 
+max_iterations: 5000
+
 # Either use seeding or not
-use_seed: true
+use_seed: false
 
 # if use_seed is true, planner will use 
 # consistent random samples during sampling process
@@ -47,9 +57,6 @@ seed_number: 0 # optional
 ## RRT related ##
 #################
 rrt:
-  # maximum number of iterations to run the algorithm
-  max_iterations: 20000
-
   # maximum distance allowed between two vertices
   max_distance: 0.8
 
@@ -67,9 +74,6 @@ rrt:
 ## RRT* related ##
 ##################
 rrt_star:
-  # maximum number of iterations to run the algorithm
-  max_iterations: 100000
-
   # maximum distance allowed between two vertices
   max_distance: 0.8
 
@@ -96,9 +100,6 @@ rrt_star:
 ## Informed RRT* related ##
 ###########################
 informed_rrt_star:
-  # maximum number of iterations to run the algorithm
-  max_iterations: 100000
-
   # Maximum number of tries to sample on prolate hyperellipsoid
   max_sampling_tries: 1000
 

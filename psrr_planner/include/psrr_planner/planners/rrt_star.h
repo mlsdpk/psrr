@@ -65,7 +65,8 @@ class RRTStar : public BasePlanner {
    * @param start Initial configuration of the robot in world frame
    * @param goal Final configuration of the robot in world frame
    */
-  void init(const Vertex& start, const Vertex& goal) override;
+  void init(const Vertex& start, const Vertex& goal,
+            unsigned int planning_time = 0) override;
 
   /**
    * @brief Main Update function of the algorithm

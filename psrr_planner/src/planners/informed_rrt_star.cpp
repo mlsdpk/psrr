@@ -43,7 +43,8 @@ InformedRRTStar::InformedRRTStar(
 
 InformedRRTStar::~InformedRRTStar(){};
 
-void InformedRRTStar::init(const Vertex& start, const Vertex& goal) {
+void InformedRRTStar::init(const Vertex& start, const Vertex& goal,
+                           unsigned int planning_time) {
   planning_finished_ = false;
   solution_found_ = false;
   iteration_number_ = 1;
@@ -93,6 +94,15 @@ void InformedRRTStar::init(const Vertex& start, const Vertex& goal) {
   edges_.clear();
   x_soln_.clear();
   vertices_.emplace_back(start_vertex_);
+
+  use_planning_time_ = false;
+  if (planning_time >= 1u) {
+    // convert planning time seconds to milliseconds
+    planning_time_ = planning_time * 1000u;
+    use_planning_time_ = true;
+  }
+
+  init_time_ = std::chrono::system_clock::now();
 }
 
 void InformedRRTStar::convertVertexToVectorXd(
@@ -312,167 +322,198 @@ double InformedRRTStar::heuristicCost2D(
 void InformedRRTStar::update() {
   if (planning_finished_) return;
 
-  if (iteration_number_ <= max_iterations_) {
-    // find the current best solution cost and parent vertex
-    double best_cost = std::numeric_limits<double>::infinity();
-    double greedy_best_cost = std::numeric_limits<double>::infinity();
-    double best_cost_2d, greedy_best_cost_2d;
+  // find the current best solution cost and parent vertex
+  double best_cost = std::numeric_limits<double>::infinity();
+  double greedy_best_cost = std::numeric_limits<double>::infinity();
+  double best_cost_2d, greedy_best_cost_2d;
 
+  if (x_soln_.size() > 0) {
+    // find the best parent vertex for the goal
+    std::shared_ptr<Vertex> best_goal_parent;
+    for (const auto& v : x_soln_) {
+      double c = euclideanCost(v);
+      if (c < best_cost) {
+        best_cost = c;
+        best_goal_parent = v;
+      }
+    }
+
+    // now we need to find properties for both informed set and greedy
+    // informed set just for visualization purposes, however we only use one
+    // during sampling based on use_greedy_informed_set_ flag
+
+    // greedy informed set stuffs
+    double greedy_max_cost = 0.0;
+    std::shared_ptr<Vertex> greedy_max_vertex;
+    std::shared_ptr<Vertex> curr_v = best_goal_parent;
+    while (curr_v->parent) {
+      double hc = heuristicCost(curr_v);
+      if (hc > greedy_max_cost) {
+        greedy_max_cost = hc;
+        greedy_max_vertex = curr_v;
+      }
+      curr_v = curr_v->parent;
+    }
+    greedy_best_cost = greedy_max_cost;
+    greedy_best_cost_2d = heuristicCost2D(greedy_max_vertex);
+
+    // informed set stuffs
+    best_cost += euclideanDistance(best_goal_parent, goal_vertex_);
+    // we need to find 2D transverse diameter
+    // we gonna use it for visualization purposes
+    best_cost_2d = euclideanCost2D(best_goal_parent) +
+                   euclideanDistance2D(best_goal_parent, goal_vertex_);
+  }
+
+  bool c_i_updated = false;
+  if (use_greedy_informed_set_) {
+    if (greedy_best_cost < c_i_) {
+      c_i_ = greedy_best_cost;
+      c_i_updated = true;
+    }
+  } else {
+    if (best_cost < c_i_) {
+      c_i_ = best_cost;
+      c_i_updated = true;
+    }
+  }
+
+  if (c_i_updated) {
+    // update 2D transverse and conjugate diameters
+    transverse_dia_2d_[0] = best_cost_2d;
+    transverse_dia_2d_[1] = greedy_best_cost_2d;
+    updateConjugateDiameter2D();
+
+    // Update the new measure:
+    // make sure we include SO(2) component
+    current_measure_ =
+        prolateHyperspheroidMeasure(informed_dims_, c_min_, c_i_) * 2.0 * M_PI;
+  }
+
+  std::shared_ptr<Vertex> x_rand = std::make_shared<Vertex>();
+  std::shared_ptr<Vertex> x_nearest = std::make_shared<Vertex>();
+  std::shared_ptr<Vertex> x_new = std::make_shared<Vertex>();
+
+  sample(x_rand);
+  nearest(x_rand, x_nearest);
+
+  // find the distance between x_rand and x_nearest
+  double d = distance(x_rand, x_nearest);
+
+  // if this distance d > delta_q, we need to find nearest state in the
+  // direction of x_rand
+  if (d > max_distance_) {
+    interpolate(x_nearest, x_rand, max_distance_ / d, x_new);
+  } else {
+    x_new->state = x_rand->state;
+  }
+
+  if (!isCollision(x_nearest, x_new)) {
+    // find all the nearest neighbours inside radius
+    std::vector<std::shared_ptr<Vertex>> X_near;
+    near(x_new, X_near);
+
+    vertices_.emplace_back(x_new);
+
+    // choose parent
+    std::shared_ptr<Vertex> x_min = x_nearest;
+    for (const auto& x_near : X_near) {
+      double c_new = cost(x_near) + distance(x_near, x_new);
+      if (c_new < cost(x_min) + distance(x_min, x_new)) {
+        if (!isCollision(x_near, x_new)) {
+          x_min = x_near;
+        }
+      }
+    }
+    x_new->parent = x_min;
+    edges_.emplace_back(x_new->parent, x_new);
+
+    // rewiring
+    for (const auto& x_near : X_near) {
+      double c_near = cost(x_new) + distance(x_new, x_near);
+      if (c_near < cost(x_near)) {
+        if (!isCollision(x_near, x_new)) {
+          edges_.erase(std::remove(edges_.begin(), edges_.end(),
+                                   std::make_pair(x_near->parent, x_near)),
+                       edges_.end());
+          x_near->parent = x_new;
+          edges_.emplace_back(x_new, x_near);
+        }
+      }
+    }
+
+    // add into x_soln if the vertex is within the goal radius
+    if (inGoalRegion(x_new)) {
+      x_soln_.emplace_back(x_new);
+    }
+  }
+
+  // update the best parent for the goal vertex every n iterations
+  if (iteration_number_ % update_goal_every_ == 0) {
     if (x_soln_.size() > 0) {
-      // find the best parent vertex for the goal
       std::shared_ptr<Vertex> best_goal_parent;
+      double min_goal_parent_cost = std::numeric_limits<double>::infinity();
+
       for (const auto& v : x_soln_) {
-        double c = euclideanCost(v);
-        if (c < best_cost) {
-          best_cost = c;
+        double c = cost(v);
+        if (c < min_goal_parent_cost) {
+          min_goal_parent_cost = c;
           best_goal_parent = v;
         }
       }
-
-      // now we need to find properties for both informed set and greedy
-      // informed set just for visualization purposes, however we only use one
-      // during sampling based on use_greedy_informed_set_ flag
-
-      // greedy informed set stuffs
-      double greedy_max_cost = 0.0;
-      std::shared_ptr<Vertex> greedy_max_vertex;
-      std::shared_ptr<Vertex> curr_v = best_goal_parent;
-      while (curr_v->parent) {
-        double hc = heuristicCost(curr_v);
-        if (hc > greedy_max_cost) {
-          greedy_max_cost = hc;
-          greedy_max_vertex = curr_v;
-        }
-        curr_v = curr_v->parent;
-      }
-      greedy_best_cost = greedy_max_cost;
-      greedy_best_cost_2d = heuristicCost2D(greedy_max_vertex);
-
-      // informed set stuffs
-      best_cost += euclideanDistance(best_goal_parent, goal_vertex_);
-      // we need to find 2D transverse diameter
-      // we gonna use it for visualization purposes
-      best_cost_2d = euclideanCost2D(best_goal_parent) +
-                     euclideanDistance2D(best_goal_parent, goal_vertex_);
+      goal_vertex_->parent = best_goal_parent;
+      solution_found_ = true;
     }
+  }
 
-    bool c_i_updated = false;
-    if (use_greedy_informed_set_) {
-      if (greedy_best_cost < c_i_) {
-        c_i_ = greedy_best_cost;
-        c_i_updated = true;
-      }
+  if (iteration_number_ % print_every_ == 0) {
+    if (solution_found_) {
+      std::cout << "Iter no. " << iteration_number_
+                << " | Solution cost: " << getSolutionCost() << std::endl;
     } else {
-      if (best_cost < c_i_) {
-        c_i_ = best_cost;
-        c_i_updated = true;
-      }
+      std::cout << "Iter no. " << iteration_number_
+                << " | Solution is not found yet." << std::endl;
     }
+  }
 
-    if (c_i_updated) {
-      // update 2D transverse and conjugate diameters
-      transverse_dia_2d_[0] = best_cost_2d;
-      transverse_dia_2d_[1] = greedy_best_cost_2d;
-      updateConjugateDiameter2D();
+  iteration_number_++;
+  auto execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now() - init_time_)
+                            .count();
 
-      // Update the new measure:
-      // make sure we include SO(2) component
-      current_measure_ =
-          prolateHyperspheroidMeasure(informed_dims_, c_min_, c_i_) * 2.0 *
-          M_PI;
-    }
+  // are we using time to plan?
+  if (use_planning_time_) {
+    if (execution_time >= planning_time_) {
+      planning_finished_ = true;
 
-    std::shared_ptr<Vertex> x_rand = std::make_shared<Vertex>();
-    std::shared_ptr<Vertex> x_nearest = std::make_shared<Vertex>();
-    std::shared_ptr<Vertex> x_new = std::make_shared<Vertex>();
+      std::cout << "Iter no: " << iteration_number_ - 1
+                << " | Soluion cost: " << getSolutionCost() << std::endl;
 
-    sample(x_rand);
-    nearest(x_rand, x_nearest);
-
-    // find the distance between x_rand and x_nearest
-    double d = distance(x_rand, x_nearest);
-
-    // if this distance d > delta_q, we need to find nearest state in the
-    // direction of x_rand
-    if (d > max_distance_) {
-      interpolate(x_nearest, x_rand, max_distance_ / d, x_new);
-    } else {
-      x_new->state = x_rand->state;
-    }
-
-    if (!isCollision(x_nearest, x_new)) {
-      // find all the nearest neighbours inside radius
-      std::vector<std::shared_ptr<Vertex>> X_near;
-      near(x_new, X_near);
-
-      vertices_.emplace_back(x_new);
-
-      // choose parent
-      std::shared_ptr<Vertex> x_min = x_nearest;
-      for (const auto& x_near : X_near) {
-        double c_new = cost(x_near) + distance(x_near, x_new);
-        if (c_new < cost(x_min) + distance(x_min, x_new)) {
-          if (!isCollision(x_near, x_new)) {
-            x_min = x_near;
-          }
-        }
-      }
-      x_new->parent = x_min;
-      edges_.emplace_back(x_new->parent, x_new);
-
-      // rewiring
-      for (const auto& x_near : X_near) {
-        double c_near = cost(x_new) + distance(x_new, x_near);
-        if (c_near < cost(x_near)) {
-          if (!isCollision(x_near, x_new)) {
-            edges_.erase(std::remove(edges_.begin(), edges_.end(),
-                                     std::make_pair(x_near->parent, x_near)),
-                         edges_.end());
-            x_near->parent = x_new;
-            edges_.emplace_back(x_new, x_near);
-          }
-        }
-      }
-
-      // add into x_soln if the vertex is within the goal radius
-      if (inGoalRegion(x_new)) {
-        x_soln_.emplace_back(x_new);
-      }
-    }
-
-    // update the best parent for the goal vertex every n iterations
-    if (iteration_number_ % update_goal_every_ == 0) {
-      if (x_soln_.size() > 0) {
-        std::shared_ptr<Vertex> best_goal_parent;
-        double min_goal_parent_cost = std::numeric_limits<double>::infinity();
-
-        for (const auto& v : x_soln_) {
-          double c = cost(v);
-          if (c < min_goal_parent_cost) {
-            min_goal_parent_cost = c;
-            best_goal_parent = v;
-          }
-        }
-        goal_vertex_->parent = best_goal_parent;
-        solution_found_ = true;
-      }
-    }
-
-    if (iteration_number_ % print_every_ == 0) {
-      if (solution_found_) {
-        std::cout << "Iter no. " << iteration_number_
-                  << " | Solution cost: " << getSolutionCost() << std::endl;
+      if (execution_time < 1000) {
+        std::cout << "Total planning time is " << execution_time << " ms."
+                  << std::endl;
       } else {
-        std::cout << "Iter no. " << iteration_number_
-                  << " | Solution is not found yet." << std::endl;
+        std::cout << "Total planning time is " << execution_time * 0.001
+                  << " s." << std::endl;
       }
     }
-
-    iteration_number_++;
   } else {
-    planning_finished_ = true;
-    std::cout << "Iterations number reach max limit. Algorithm stopped."
-              << '\n';
+    if (iteration_number_ > max_iterations_) {
+      planning_finished_ = true;
+      std::cout << "Iterations number reach max limit. Algorithm stopped."
+                << '\n';
+
+      std::cout << "Iter no: " << iteration_number_ - 1
+                << " | Soluion cost: " << getSolutionCost() << std::endl;
+
+      if (execution_time < 1000) {
+        std::cout << "Total planning time is " << execution_time << " ms."
+                  << std::endl;
+      } else {
+        std::cout << "Total planning time is " << execution_time * 0.001
+                  << " s." << std::endl;
+      }
+    }
   }
 }
 

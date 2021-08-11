@@ -43,7 +43,8 @@ RRTStar::RRTStar(const StateLimits& state_limits,
 
 RRTStar::~RRTStar(){};
 
-void RRTStar::init(const Vertex& start, const Vertex& goal) {
+void RRTStar::init(const Vertex& start, const Vertex& goal,
+                   unsigned int planning_time) {
   planning_finished_ = false;
   solution_found_ = false;
   iteration_number_ = 1;
@@ -62,6 +63,15 @@ void RRTStar::init(const Vertex& start, const Vertex& goal) {
   edges_.clear();
   x_soln_.clear();
   vertices_.emplace_back(start_vertex_);
+
+  use_planning_time_ = false;
+  if (planning_time >= 1u) {
+    // convert planning time seconds to milliseconds
+    planning_time_ = planning_time * 1000u;
+    use_planning_time_ = true;
+  }
+
+  init_time_ = std::chrono::system_clock::now();
 }
 
 void RRTStar::near(const std::shared_ptr<const Vertex>& x_new,
@@ -91,98 +101,130 @@ void RRTStar::updateRewiringLowerBounds() {
 void RRTStar::update() {
   if (planning_finished_) return;
 
-  if (iteration_number_ <= max_iterations_) {
-    std::shared_ptr<Vertex> x_rand = std::make_shared<Vertex>();
-    std::shared_ptr<Vertex> x_nearest = std::make_shared<Vertex>();
-    std::shared_ptr<Vertex> x_new = std::make_shared<Vertex>();
+  std::shared_ptr<Vertex> x_rand = std::make_shared<Vertex>();
+  std::shared_ptr<Vertex> x_nearest = std::make_shared<Vertex>();
+  std::shared_ptr<Vertex> x_new = std::make_shared<Vertex>();
 
-    sample(x_rand);
-    nearest(x_rand, x_nearest);
+  sample(x_rand);
+  nearest(x_rand, x_nearest);
 
-    // find the distance between x_rand and x_nearest
-    double d = distance(x_rand, x_nearest);
+  // find the distance between x_rand and x_nearest
+  double d = distance(x_rand, x_nearest);
 
-    // if this distance d > delta_q, we need to find nearest state in the
-    // direction of x_rand
-    if (d > max_distance_) {
-      interpolate(x_nearest, x_rand, max_distance_ / d, x_new);
-    } else {
-      x_new->state = x_rand->state;
-    }
-
-    if (!isCollision(x_nearest, x_new)) {
-      // find all the nearest neighbours inside radius
-      std::vector<std::shared_ptr<Vertex>> X_near;
-      near(x_new, X_near);
-
-      vertices_.emplace_back(x_new);
-
-      // choose parent
-      std::shared_ptr<Vertex> x_min = x_nearest;
-      for (const auto& x_near : X_near) {
-        double c_new = cost(x_near) + distance(x_near, x_new);
-        if (c_new < cost(x_min) + distance(x_min, x_new)) {
-          if (!isCollision(x_near, x_new)) {
-            x_min = x_near;
-          }
-        }
-      }
-      x_new->parent = x_min;
-      edges_.emplace_back(x_new->parent, x_new);
-
-      // rewiring
-      for (const auto& x_near : X_near) {
-        double c_near = cost(x_new) + distance(x_new, x_near);
-        if (c_near < cost(x_near)) {
-          if (!isCollision(x_near, x_new)) {
-            edges_.erase(std::remove(edges_.begin(), edges_.end(),
-                                     std::make_pair(x_near->parent, x_near)),
-                         edges_.end());
-            x_near->parent = x_new;
-            edges_.emplace_back(x_new, x_near);
-          }
-        }
-      }
-
-      // add into x_soln if the vertex is within the goal radius
-      if (inGoalRegion(x_new)) {
-        x_soln_.emplace_back(x_new);
-      }
-    }
-
-    // update the best parent for the goal vertex every n iterations
-    if (iteration_number_ % update_goal_every_ == 0) {
-      if (x_soln_.size() > 0) {
-        std::shared_ptr<Vertex> best_goal_parent;
-        double min_goal_parent_cost = std::numeric_limits<double>::infinity();
-
-        for (const auto& v : x_soln_) {
-          double c = cost(v);
-          if (c < min_goal_parent_cost) {
-            min_goal_parent_cost = c;
-            best_goal_parent = v;
-          }
-        }
-        goal_vertex_->parent = best_goal_parent;
-        solution_found_ = true;
-      }
-    }
-
-    if (iteration_number_ % print_every_ == 0) {
-      if (solution_found_) {
-        std::cout << "Iter no. " << iteration_number_
-                  << " | Solution cost: " << getSolutionCost() << std::endl;
-      } else {
-        std::cout << "Iter no. " << iteration_number_
-                  << " | Solution is not found yet." << std::endl;
-      }
-    }
-
-    iteration_number_++;
+  // if this distance d > delta_q, we need to find nearest state in the
+  // direction of x_rand
+  if (d > max_distance_) {
+    interpolate(x_nearest, x_rand, max_distance_ / d, x_new);
   } else {
-    planning_finished_ = true;
-    std::cout << "Iterations number reach max limit. Algorithm stopped."
-              << '\n';
+    x_new->state = x_rand->state;
+  }
+
+  if (!isCollision(x_nearest, x_new)) {
+    // find all the nearest neighbours inside radius
+    std::vector<std::shared_ptr<Vertex>> X_near;
+    near(x_new, X_near);
+
+    vertices_.emplace_back(x_new);
+
+    // choose parent
+    std::shared_ptr<Vertex> x_min = x_nearest;
+    for (const auto& x_near : X_near) {
+      double c_new = cost(x_near) + distance(x_near, x_new);
+      if (c_new < cost(x_min) + distance(x_min, x_new)) {
+        if (!isCollision(x_near, x_new)) {
+          x_min = x_near;
+        }
+      }
+    }
+    x_new->parent = x_min;
+    edges_.emplace_back(x_new->parent, x_new);
+
+    // rewiring
+    for (const auto& x_near : X_near) {
+      double c_near = cost(x_new) + distance(x_new, x_near);
+      if (c_near < cost(x_near)) {
+        if (!isCollision(x_near, x_new)) {
+          edges_.erase(std::remove(edges_.begin(), edges_.end(),
+                                   std::make_pair(x_near->parent, x_near)),
+                       edges_.end());
+          x_near->parent = x_new;
+          edges_.emplace_back(x_new, x_near);
+        }
+      }
+    }
+
+    // add into x_soln if the vertex is within the goal radius
+    if (inGoalRegion(x_new)) {
+      x_soln_.emplace_back(x_new);
+    }
+  }
+
+  // update the best parent for the goal vertex every n iterations
+  if (iteration_number_ % update_goal_every_ == 0) {
+    if (x_soln_.size() > 0) {
+      std::shared_ptr<Vertex> best_goal_parent;
+      double min_goal_parent_cost = std::numeric_limits<double>::infinity();
+
+      for (const auto& v : x_soln_) {
+        double c = cost(v);
+        if (c < min_goal_parent_cost) {
+          min_goal_parent_cost = c;
+          best_goal_parent = v;
+        }
+      }
+      goal_vertex_->parent = best_goal_parent;
+      solution_found_ = true;
+    }
+  }
+
+  if (iteration_number_ % print_every_ == 0) {
+    if (solution_found_) {
+      std::cout << "Iter no. " << iteration_number_
+                << " | Solution cost: " << getSolutionCost() << std::endl;
+    } else {
+      std::cout << "Iter no. " << iteration_number_
+                << " | Solution is not found yet." << std::endl;
+    }
+  }
+
+  iteration_number_++;
+  auto execution_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now() - init_time_)
+                            .count();
+
+  // are we using time to plan?
+  if (use_planning_time_) {
+    if (execution_time >= planning_time_) {
+      planning_finished_ = true;
+
+      std::cout << "Iter no: " << iteration_number_ - 1
+                << " | Soluion cost: " << getSolutionCost() << std::endl;
+
+      if (execution_time < 1000) {
+        std::cout << "Total planning time is " << execution_time << " ms."
+                  << std::endl;
+      } else {
+        std::cout << "Total planning time is " << execution_time * 0.001
+                  << " s." << std::endl;
+      }
+    }
+  } else {
+    if (iteration_number_ > max_iterations_) {
+      planning_finished_ = true;
+      std::cout << "Iterations number reach max limit. Algorithm stopped."
+                << '\n';
+
+      std::cout << "Iter no: " << iteration_number_ - 1
+                << " | Soluion cost: " << getSolutionCost() << std::endl;
+
+      if (execution_time < 1000) {
+        std::cout << "Total planning time is " << execution_time << " ms."
+                  << std::endl;
+      } else {
+        std::cout << "Total planning time is " << execution_time * 0.001
+                  << " s." << std::endl;
+      }
+    }
   }
 }
 

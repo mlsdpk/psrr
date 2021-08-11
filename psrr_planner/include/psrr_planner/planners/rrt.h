@@ -60,8 +60,11 @@ class RRT : public BasePlanner {
    * @brief Initialize rrt with start and goal vertices
    * @param start Initial configuration of the robot in world frame
    * @param goal Final configuration of the robot in world frame
+   * @param planning_time Time to plan the path (if time is 0,
+   * max_iterations is used instead)
    */
-  void init(const Vertex& start, const Vertex& goal) override;
+  void init(const Vertex& start, const Vertex& goal,
+            unsigned int planning_time = 0) override;
 
   /**
    * @brief Main Update function of the algorithm

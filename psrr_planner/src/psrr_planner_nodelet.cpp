@@ -219,19 +219,53 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         ROS_WARN("use_seed parameter not found. Using random seeding...");
       }
 
+      // check are we planning in time or iterations
+      bool use_planning_time = false;
+      int planning_time = 0;
+      int max_iterations;
+      if (private_nh_.hasParam("use_planning_time")) {
+        private_nh_.param<bool>("use_planning_time", use_planning_time,
+                                use_planning_time);
+        // if use planning, make sure planning time is given
+        if (use_planning_time) {
+          if (private_nh_.hasParam("planning_time")) {
+            private_nh_.param<int>("planning_time", planning_time,
+                                   planning_time);
+          } else {
+            ROS_ERROR(
+                "use_planning_time is true but planning_time parameter not "
+                "found.");
+            return;
+          }
+        } else {
+          // otherwise use iterations instead
+          if (private_nh_.hasParam("max_iterations")) {
+            private_nh_.param<int>("max_iterations", max_iterations,
+                                   max_iterations);
+          } else {
+            ROS_ERROR(
+                "use_planning_time is false but max_iterations parameter not "
+                "found.");
+            return;
+          }
+        }
+      } else {
+        ROS_ERROR(
+            "use_planning_time parameter not found. Make sure you set it to "
+            "either true or false.");
+        return;
+      }
+      planning_time_ = static_cast<unsigned>(planning_time);
+
       // RRT
       if (planner_type_ == "rrt") {
         ROS_INFO("Planner Type: rrt");
         // we need to check planner specific parameters are given
-        if (private_nh_.hasParam("rrt/max_iterations") &&
-            private_nh_.hasParam("rrt/max_distance") &&
+        if (private_nh_.hasParam("rrt/max_distance") &&
             private_nh_.hasParam("rrt/interpolation_dist") &&
             private_nh_.hasParam("rrt/goal_radius") &&
             private_nh_.hasParam("rrt/goal_bias")) {
-          int max_iterations;
           double max_distance, interpolation_dist, goal_radius, goal_bias;
-          private_nh_.param<int>("rrt/max_iterations", max_iterations,
-                                 max_iterations);
           private_nh_.param<double>("rrt/max_distance", max_distance,
                                     max_distance);
           private_nh_.param<double>("rrt/interpolation_dist",
@@ -254,18 +288,15 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       else if (planner_type_ == "rrt_star") {
         ROS_INFO("Planner Type: rrt_star");
         // we need to check planner specific parameters are given
-        if (private_nh_.hasParam("rrt_star/max_iterations") &&
-            private_nh_.hasParam("rrt_star/update_goal_every") &&
+        if (private_nh_.hasParam("rrt_star/update_goal_every") &&
             private_nh_.hasParam("rrt_star/max_distance") &&
             private_nh_.hasParam("rrt_star/rewire_factor") &&
             private_nh_.hasParam("rrt_star/interpolation_dist") &&
             private_nh_.hasParam("rrt_star/goal_radius") &&
             private_nh_.hasParam("rrt_star/goal_bias")) {
-          int max_iterations, update_goal_every;
+          int update_goal_every;
           double max_distance, rewire_factor, interpolation_dist, goal_radius,
               goal_bias;
-          private_nh_.param<int>("rrt_star/max_iterations", max_iterations,
-                                 max_iterations);
           private_nh_.param<int>("rrt_star/update_goal_every",
                                  update_goal_every, update_goal_every);
           private_nh_.param<double>("rrt_star/max_distance", max_distance,
@@ -296,8 +327,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         ROS_INFO("Planner Type: informed_rrt_star");
 
         // we need to check planner specific parameters are given
-        if (private_nh_.hasParam("informed_rrt_star/max_iterations") &&
-            private_nh_.hasParam("informed_rrt_star/max_sampling_tries") &&
+        if (private_nh_.hasParam("informed_rrt_star/max_sampling_tries") &&
             private_nh_.hasParam("informed_rrt_star/max_distance") &&
             private_nh_.hasParam("informed_rrt_star/rewire_factor") &&
             private_nh_.hasParam("informed_rrt_star/interpolation_dist") &&
@@ -305,12 +335,10 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
             private_nh_.hasParam("informed_rrt_star/goal_bias") &&
             private_nh_.hasParam("informed_rrt_star/use_greedy_informed_set") &&
             private_nh_.hasParam("informed_rrt_star/update_goal_every")) {
-          int max_iterations, max_sampling_tries, update_goal_every;
+          int max_sampling_tries, update_goal_every;
           double max_distance, rewire_factor, interpolation_dist, goal_radius,
               goal_bias;
           bool use_greedy_informed_set = false;
-          private_nh_.param<int>("informed_rrt_star/max_iterations",
-                                 max_iterations, max_iterations);
           private_nh_.param<int>("informed_rrt_star/max_sampling_tries",
                                  max_sampling_tries, max_sampling_tries);
           private_nh_.param<double>("informed_rrt_star/max_distance",
@@ -484,20 +512,12 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
 
     if (has_goal_pose_) {
       if (!planner_initialized_) {
-        planner_->init(start_vertex_, goal_vertex_);
-        planner_init_time_ = std::chrono::system_clock::now();
+        planner_->init(start_vertex_, goal_vertex_, planning_time_);
         planner_initialized_ = true;
       }
 
       if (planner_->isPlanningFinished()) {
         if (!planning_finished_) {
-          auto execution_time =
-              std::chrono::duration_cast<std::chrono::milliseconds>(
-                  std::chrono::system_clock::now() - planner_init_time_)
-                  .count();
-          ROS_INFO("Solution found. Planning finished in %ld ms.",
-                   execution_time);
-
           double solution_cost = planner_->getSolutionCost();
           ROS_INFO("Solution cost: %f", solution_cost);
           planning_finished_ = true;
@@ -757,6 +777,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   Vertex goal_vertex_;
 
   std::chrono::system_clock::time_point planner_init_time_;
+  unsigned int planning_time_;
 
   double planner_update_interval_;
   double path_update_interval_;

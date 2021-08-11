@@ -61,8 +61,11 @@ class BasePlanner {
    * @brief Virtual initialization function
    * @param start Initial configuration of the robot in world frame
    * @param goal Final configuration of the robot in world frame
+   * @param planning_time Time to plan the path (if time is 0, max_iterations is
+   * used instead)
    */
-  virtual void init(const Vertex& start, const Vertex& goal) = 0;
+  virtual void init(const Vertex& start, const Vertex& goal,
+                    unsigned int planning_time = 0) = 0;
 
   /**
    * @brief Main Update function of the algorithm
@@ -265,6 +268,21 @@ class BasePlanner {
    * @brief Total number of dimensions of problem state space
    */
   int state_dimensions_;
+
+  /**
+   * @brief Time to plan the path in seconds
+   */
+  unsigned int planning_time_;
+
+  /**
+   * @brief Flag to check whether we use planning_time or not
+   */
+  bool use_planning_time_;
+
+  /**
+   * @brief System init time to be used during planning with time
+   */
+  std::chrono::system_clock::time_point init_time_;
 
   /**
    * @brief Flag to check whether solution is found or not
