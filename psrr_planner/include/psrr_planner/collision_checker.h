@@ -35,6 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // ompl related
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/spaces/RealVectorStateSpace.h>
+#include <ompl/base/spaces/SO2StateSpace.h>
 #include <ompl/config.h>
 
 namespace ob = ompl::base;

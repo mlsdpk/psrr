@@ -16,6 +16,7 @@ set(${PROJECT_NAME}_CATKIN_DEPS
   interactive_markers
 )
 
+find_package(ompl REQUIRED)
 find_package(catkin REQUIRED COMPONENTS ${${PROJECT_NAME}_CATKIN_DEPS})
 
 catkin_package(
@@ -25,7 +26,9 @@ catkin_package(
 )
 
 include_directories(
-  include ${catkin_INCLUDE_DIRS}
+  include 
+  ${OMPL_INCLUDE_DIRS}
+  ${catkin_INCLUDE_DIRS}
 )
 
 add_library(${PROJECT_NAME}_nodelet
@@ -35,15 +38,28 @@ add_library(${PROJECT_NAME}_nodelet
   src/planners/informed_rrt_star.cpp
   src/planners/base_planner.cpp
 )
+
 target_link_libraries(${PROJECT_NAME}_nodelet
   ${catkin_LIBRARIES}
+  ${OMPL_LIBRARIES}
 )
 
-# Install nodelet
-install(FILES nodelet_plugins.xml
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-)
+#############
+## Install ##
+#############
 
 install(TARGETS
   ${PROJECT_NAME}_nodelet
-  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+)
+
+install(FILES 
+  nodelet_plugins.xml
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
