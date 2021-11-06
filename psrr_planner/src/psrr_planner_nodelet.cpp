@@ -31,7 +31,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <nav_msgs/Path.h>
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
-#include <psrr_msgs/FootPrint.h>
+#include <psrr_msgs/FootPrintSrv.h>
 #include <psrr_msgs/Path.h>
 #include <psrr_planner/collision_checker.h>
 #include <psrr_planner/planners/informed_rrt_star.h>
@@ -44,9 +44,22 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <tf2_ros/transform_listener.h>
 #include <visualization_msgs/MarkerArray.h>
 
+// ompl
+#include <ompl/base/DiscreteMotionValidator.h>
+#include <ompl/base/SpaceInformation.h>
+#include <ompl/base/objectives/PathLengthOptimizationObjective.h>
+#include <ompl/base/spaces/SE2StateSpace.h>
+#include <ompl/config.h>
+#include <ompl/geometric/SimpleSetup.h>
+#include <ompl/geometric/planners/rrt/RRTConnect.h>
+
 #include <atomic>
 #include <memory>
 #include <mutex>
+
+namespace ob = ompl::base;
+namespace og = ompl::geometric;
+namespace ot = ompl::time;
 
 namespace psrr_planner {
 class PsrrPlannerNodelet : public nodelet::Nodelet {
@@ -61,7 +74,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     mt_nh_ = getMTNodeHandle();
     private_nh_ = getPrivateNodeHandle();
 
-    // parameters
     private_nh_.param<double>("planner_update_interval",
                               planner_update_interval_, 0.002);
     private_nh_.param<double>("path_update_interval", path_update_interval_,
@@ -69,71 +81,14 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     private_nh_.param<bool>("publish_path_footprints", publish_path_footprints_,
                             false);
 
-    // get initial footprint from ros param
-    std::vector<double> initial_footprint_x, initial_footprint_y;
-    if (private_nh_.hasParam("initial_footprint/x") &&
-        private_nh_.hasParam("initial_footprint/y")) {
-      private_nh_.param("initial_footprint/x", initial_footprint_x,
-                        initial_footprint_x);
-      private_nh_.param("initial_footprint/y", initial_footprint_y,
-                        initial_footprint_y);
-
-      // check they have the same size or not
-      if (!(initial_footprint_x.size() == initial_footprint_y.size())) {
-        ROS_ERROR("Footprint x and y have different size.");
-        return;
-      }
-      // or empty
-      if (initial_footprint_x.size() == 0 || initial_footprint_y.size() == 0) {
-        ROS_ERROR("Footprint size is empty.");
-        return;
-      }
-    }
-    // create initial footprint
-    footprint_.resize(initial_footprint_x.size());
-    for (std::size_t i = 0; i < initial_footprint_x.size(); ++i) {
-      footprint_[i].x = initial_footprint_x[i];
-      footprint_[i].y = initial_footprint_y[i];
-    }
-
-    tf_ = std::make_shared<tf2_ros::Buffer>(ros::Duration(10));
-    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_);
-
-    planner_costmap_ros_.reset(
-        new costmap_2d::Costmap2DROS("global_costmap", *tf_));
-    planner_costmap_ros_->setUnpaddedRobotFootprint(footprint_);
-    planner_costmap_ros_->start();
-
-    // find the min and max bounds of the costmap in world coordinate
-    unsigned int costmap_size_x, costmap_size_y;
-    costmap_size_x = planner_costmap_ros_->getCostmap()->getSizeInCellsX();
-    costmap_size_y = planner_costmap_ros_->getCostmap()->getSizeInCellsY();
-
-    double w0_x, w0_y, w1_x, w1_y;
-    planner_costmap_ros_->getCostmap()->mapToWorld(0, 0, w0_x, w0_y);
-    planner_costmap_ros_->getCostmap()->mapToWorld(
-        costmap_size_x - 1, costmap_size_y - 1, w1_x, w1_y);
-
-    // now we can create state space of our robot including min and max limits
-    StateLimits state_limits;
-
-    // x and y of state
-    state_limits.min_x = static_cast<float>(w0_x);
-    state_limits.max_x = static_cast<float>(w1_x);
-    state_limits.min_y = static_cast<float>(w0_y);
-    state_limits.max_y = static_cast<float>(w1_y);
-
-    // orientation of state
-    bool use_orientation;
-    private_nh_.param<bool>("use_orientation", use_orientation, false);
-    if (use_orientation) {
-      state_limits.min_theta = -M_PI;
-      state_limits.max_theta = M_PI;
-    }
-
+    // here we decide to use either static footprint or dynamic one based on
+    // joint_pos_limits_min and joint_pos_limits_max parameters
     use_static_collision_checking_ = true;
 
-    // joint positions of state
+    // create state limits of the robot state space
+    StateLimits state_limits;
+
+    // joint positions of state space
     if (private_nh_.hasParam("joint_pos_limits_min") &&
         private_nh_.hasParam("joint_pos_limits_max")) {
       std::vector<double> joint_pos_limits_min, joint_pos_limits_max;
@@ -145,7 +100,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
       // check to make sure both have the same size
       if (joint_pos_limits_min.size() != joint_pos_limits_max.size()) {
         ROS_ERROR("Joint position limits do not have the same size.");
-        return;
+        exit(1);
       }
       // can be empty, but if they are empty, we neglect these joints and don't
       // use in the planning
@@ -159,6 +114,84 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         }
         use_static_collision_checking_ = false;
       }
+    }
+    // if these parameters are not provided, we assume we are using static
+    // footprint and planning in only R2 or SE2 state space and warn the user
+    // about this
+    else {
+      ROS_WARN(
+          "Joint position limits are not found in parameter server. Assuming "
+          "planning in R2 or SE2 space with static footprint.");
+    }
+
+    // create footprint object
+    footprint_ = std::make_shared<std::vector<geometry_msgs::Point>>();
+
+    // get initial footprint from ros param if using static footprint
+    if (use_static_collision_checking_) {
+      std::vector<double> initial_footprint_x, initial_footprint_y;
+      if (private_nh_.hasParam("initial_footprint/x") &&
+          private_nh_.hasParam("initial_footprint/y")) {
+        private_nh_.param("initial_footprint/x", initial_footprint_x,
+                          initial_footprint_x);
+        private_nh_.param("initial_footprint/y", initial_footprint_y,
+                          initial_footprint_y);
+
+        // check they have the same size or not
+        if (!(initial_footprint_x.size() == initial_footprint_y.size())) {
+          ROS_ERROR("Initial footprint x and y have different size.");
+          exit(1);
+        }
+        // or empty
+        if (initial_footprint_x.size() == 0 ||
+            initial_footprint_y.size() == 0) {
+          ROS_ERROR("Initial footprint size is empty.");
+          exit(1);
+        }
+
+        footprint_->resize(initial_footprint_x.size());
+        for (std::size_t i = 0; i < initial_footprint_x.size(); ++i) {
+          (*footprint_)[i].x = initial_footprint_x[i];
+          (*footprint_)[i].y = initial_footprint_y[i];
+        }
+      }
+      // if not provided, raise error
+      else {
+        ROS_ERROR("Initial footprint not found in the parameter server.");
+        exit(1);
+      }
+    }
+
+    tf_ = std::make_shared<tf2_ros::Buffer>(ros::Duration(10));
+    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_);
+
+    planner_costmap_ros_.reset(
+        new costmap_2d::Costmap2DROS("global_costmap", *tf_));
+    planner_costmap_ros_->setUnpaddedRobotFootprint(*footprint_);
+    planner_costmap_ros_->start();
+
+    // find the min and max bounds of the costmap in world coordinate
+    unsigned int costmap_size_x, costmap_size_y;
+    costmap_size_x = planner_costmap_ros_->getCostmap()->getSizeInCellsX();
+    costmap_size_y = planner_costmap_ros_->getCostmap()->getSizeInCellsY();
+
+    double w0_x, w0_y, w1_x, w1_y;
+    planner_costmap_ros_->getCostmap()->mapToWorld(0, 0, w0_x, w0_y);
+    planner_costmap_ros_->getCostmap()->mapToWorld(
+        costmap_size_x - 1, costmap_size_y - 1, w1_x, w1_y);
+
+    // x and y of state
+    state_limits.min_x = static_cast<float>(w0_x);
+    state_limits.max_x = static_cast<float>(w1_x);
+    state_limits.min_y = static_cast<float>(w0_y);
+    state_limits.max_y = static_cast<float>(w1_y);
+
+    // orientation of state
+    bool use_orientation;
+    private_nh_.param<bool>("use_orientation", use_orientation, false);
+    if (use_orientation) {
+      state_limits.min_theta = -M_PI;
+      state_limits.max_theta = M_PI;
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -178,22 +211,68 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
 
       // make persistent ros service for faster client calls
       footprint_client_ = std::make_shared<ros::ServiceClient>(
-          mt_nh_.serviceClient<psrr_msgs::FootPrint>("footprint_server", true));
+          mt_nh_.serviceClient<psrr_msgs::FootPrintSrv>("footprint_server",
+                                                        true));
     }
-
-    ////////////////////////////////////////////////////////////////////////////
 
     // create collision checker object
     // and passes costmap pointer to it
     if (use_static_collision_checking_) {
       ROS_INFO("Static collision checking is used.");
       collision_checker_.reset(new GridCollisionChecker(
-          planner_costmap_ros_->getCostmap(), footprint_));
+          planner_costmap_ros_->getCostmap(), *footprint_));
     } else {
       ROS_INFO("Dynamic collision checking is used.");
       collision_checker_.reset(new GridCollisionChecker(
           planner_costmap_ros_->getCostmap(), footprint_client_));
     }
+
+    // OMPL stuffs
+
+    // get number of joints
+    const auto n_joints = state_limits.min_joint_pos.size();
+    // number of real vector states
+    const auto rn = 2u + static_cast<unsigned>(n_joints);
+
+    // ompl real state space bounds
+    ob::RealVectorBounds bounds(rn);
+    bounds.setLow(0, state_limits.min_x);
+    bounds.setLow(1, state_limits.min_y);
+    bounds.setHigh(0, state_limits.max_x);
+    bounds.setHigh(1, state_limits.max_y);
+    for (std::size_t i = 0; i < n_joints; ++i) {
+      bounds.setLow(i + 2, state_limits.min_joint_pos[i]);
+      bounds.setHigh(i + 2, state_limits.max_joint_pos[i]);
+    }
+
+    // create ompl compound state space
+    space_ = std::make_shared<ob::CompoundStateSpace>();
+    // add real vector states (order are in x, y, j1, j2, ...)
+    space_->as<ob::CompoundStateSpace>()->addSubspace(
+        std::make_shared<ob::RealVectorStateSpace>(rn), 1.0);
+    // heading
+    space_->as<ob::CompoundStateSpace>()->addSubspace(
+        std::make_shared<ob::SO2StateSpace>(), 0.5);
+
+    // set bounds for real vector states
+    space_->as<ob::CompoundStateSpace>()
+        ->as<ob::RealVectorStateSpace>(0)
+        ->setBounds(bounds);
+
+    space_->setup();
+    ss_ = std::make_shared<og::SimpleSetup>(space_);
+    si_ = ss_->getSpaceInformation();
+
+    start_state_ = std::make_shared<ob::ScopedState<>>(space_);
+    goal_state_ = std::make_shared<ob::ScopedState<>>(space_);
+
+    ss_->setStateValidityChecker([this](const ob::State* state) {
+      return collision_checker_->isCollision(state);
+    });
+
+    // planning objective
+    ss_->setOptimizationObjective(
+        std::make_shared<ob::PathLengthOptimizationObjective>(si_));
 
     if (private_nh_.hasParam("planner_type")) {
       private_nh_.param<std::string>("planner_type", planner_type_,
@@ -696,7 +775,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
             footprint = planner_costmap_ros_->getUnpaddedRobotFootprint();
           } else {
             // here we use our shared ros service to get the footprint
-            psrr_msgs::FootPrint footprint_req_msg;
+            psrr_msgs::FootPrintSrv footprint_req_msg;
             for (const auto pos : current->state.joint_pos) {
               footprint_req_msg.request.position.push_back(
                   static_cast<double>(pos));
@@ -765,6 +844,7 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   // service clients
   std::shared_ptr<ros::ServiceClient> footprint_client_;
 
+  // tf related
   std::shared_ptr<tf2_ros::Buffer> tf_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
@@ -788,7 +868,14 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   std::atomic_bool use_static_collision_checking_;
   std::atomic_bool planner_initialized_;
 
-  std::vector<geometry_msgs::Point> footprint_;
+  std::shared_ptr<std::vector<geometry_msgs::Point>> footprint_;
+
+  // ompl related
+  ob::StateSpacePtr space_;
+  og::SimpleSetupPtr ss_;
+  ob::SpaceInformationPtr si_;
+  ob::ScopedStatePtr start_state_;
+  ob::ScopedStatePtr goal_state_;
 };
 }  // namespace psrr_planner
 

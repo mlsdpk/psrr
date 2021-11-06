@@ -16,7 +16,7 @@ add_message_files(
 
 add_service_files(
   FILES
-  FootPrint.srv
+  FootPrintSrv.srv
 )
 
 generate_messages(

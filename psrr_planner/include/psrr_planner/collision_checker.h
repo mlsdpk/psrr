@@ -29,8 +29,15 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <costmap_2d/costmap_2d_ros.h>
 #include <costmap_2d/footprint.h>
 #include <geometry_msgs/Polygon.h>
-#include <psrr_msgs/FootPrint.h>
+#include <psrr_msgs/FootPrintSrv.h>
 #include <psrr_planner/line_iterator.h>
+
+// ompl related
+#include <ompl/base/SpaceInformation.h>
+#include <ompl/base/spaces/RealVectorStateSpace.h>
+#include <ompl/config.h>
+
+namespace ob = ompl::base;
 
 namespace psrr_planner {
 
@@ -64,16 +71,52 @@ class GridCollisionChecker {
         use_static_footprint_{false} {}
 
   /**
+   * @brief Check whether ompl compound state is in collision or not
+   * @param state OMPL state
+   * @return true if is in collision, otherwise false
+   */
+  bool isCollision(const ob::State* state) {
+    if (!state) {
+      throw std::runtime_error("No state found for vertex");
+    }
+
+    // Convert to CompoundStateSpace
+    const ob::CompoundStateSpace::StateType& compound_state =
+        *state->as<ob::CompoundStateSpace::StateType>();
+
+    // number of dimensions in R^n
+    const auto rn_size =
+        compound_state.as<ob::RealVectorStateSpace>(0)->getDimension();
+
+    // R^n State Space
+    const ob::RealVectorStateSpace::StateType& rn_state =
+        *compound_state.as<ob::RealVectorStateSpace::StateType>(0);
+
+    // SO(2) State Space
+    const ob::SO2StateSpace::StateType& so2_state =
+        *compound_state.as<ob::SO2StateSpace::StateType>(1);
+
+    // extract joint positions from left-over portion of R^n state space
+    std::vector<double> joint_pos;
+    for (std::size_t i = 0; i < rn_size - 2; ++i) {
+      joint_pos.push_back(rn_state.values[i + 2]);
+    }
+
+    return isCollision(rn_state.values[0], rn_state.values[1], so2_state.value,
+                       joint_pos);
+  }
+
+  /**
    * @brief Check if the footprint is in collision with the current shared
    * costmap (footprint here is not transformed to pose yet)
    * @param x X coordinate of pose to check against
    * @param y Y coordinate of pose to check against
    * @param theta Angle of pose to check against
    * @param joint_pos n-dimensional joint positions of pose to check against
-   * @return boolean if in collision or not.
+   * @return true if is in collision, otherwise false
    */
   bool isCollision(const double x, const double y, const double theta,
-                   const std::vector<float>& joint_pos) {
+                   const std::vector<double>& joint_pos) {
     // always check the cell corrdinate of the center of the robot
     unsigned int cell_x, cell_y;
     if (!costmap_->worldToMap(x, y, cell_x, cell_y)) return true;
@@ -93,16 +136,16 @@ class GridCollisionChecker {
                                      transformed_footprint);
     } else {
       // here we use our shared ros service to get the footprint
-      psrr_msgs::FootPrint footprint_req_msg;
+      psrr_msgs::FootPrintSrv footprint_req_msg;
       for (const auto pos : joint_pos) {
-        footprint_req_msg.request.position.push_back(static_cast<double>(pos));
+        footprint_req_msg.request.position.push_back(pos);
       }
       std::vector<geometry_msgs::Point> footprint;
       if (footprint_client_->call(footprint_req_msg)) {
         footprint = footprint_req_msg.response.points;
       } else {
         ROS_ERROR("Failed to call footprint service.");
-        return -1;
+        exit(1);
       }
       costmap_2d::transformFootprint(x, y, theta, footprint,
                                      transformed_footprint);
