@@ -27,16 +27,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <costmap_2d/costmap_2d_ros.h>
 #include <geometry_msgs/Point.h>
 #include <geometry_msgs/PoseStamped.h>
-#include <jsk_recognition_msgs/PolygonArray.h>
 #include <nav_msgs/Path.h>
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
 #include <psrr_msgs/FootPrintSrv.h>
 #include <psrr_msgs/Path.h>
 #include <psrr_planner/collision_checker.h>
-#include <psrr_planner/planners/informed_rrt_star.h>
-#include <psrr_planner/planners/rrt.h>
-#include <psrr_planner/planners/rrt_star.h>
+#include <psrr_planner/utilities.h>
+#include <psrr_planner/visualizer.h>
 #include <ros/ros.h>
 #include <tf/transform_datatypes.h>
 #include <tf2/convert.h>
@@ -49,9 +47,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/objectives/PathLengthOptimizationObjective.h>
 #include <ompl/base/spaces/SE2StateSpace.h>
+#include <ompl/base/terminationconditions/IterationTerminationCondition.h>
 #include <ompl/config.h>
 #include <ompl/geometric/SimpleSetup.h>
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
+#include <ompl/geometric/planners/rrt/RRTstar.h>
 
 #include <atomic>
 #include <memory>
@@ -62,6 +62,15 @@ namespace og = ompl::geometric;
 namespace ot = ompl::time;
 
 namespace psrr_planner {
+
+using utils::State;
+using utils::StateLimits;
+
+enum PLANNING_MODE { DURATION, ITERATIONS };
+enum PLANNERS_IDS { RRT_CONNECT, RRT_STAR };
+
+const std::vector<std::string> PLANNER_NAMES{"rrt_connect", "rrt_star"};
+
 class PsrrPlannerNodelet : public nodelet::Nodelet {
  public:
   PsrrPlannerNodelet() {}
@@ -80,6 +89,9 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                               1.0);
     private_nh_.param<bool>("publish_path_footprints", publish_path_footprints_,
                             false);
+
+    // initialize visualizer
+    visualizer_ = std::make_shared<visualizer::Visualizer>(mt_nh_, private_nh_);
 
     // here we decide to use either static footprint or dynamic one based on
     // joint_pos_limits_min and joint_pos_limits_max parameters
@@ -215,20 +227,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                                                         true));
     }
 
-    // create collision checker object
-    // and passes costmap pointer to it
-    if (use_static_collision_checking_) {
-      ROS_INFO("Static collision checking is used.");
-      collision_checker_.reset(new GridCollisionChecker(
-          planner_costmap_ros_->getCostmap(), *footprint_));
-    } else {
-      ROS_INFO("Dynamic collision checking is used.");
-      collision_checker_.reset(new GridCollisionChecker(
-          planner_costmap_ros_->getCostmap(), footprint_client_));
-    }
-
-    // OMPL stuffs
-
     // get number of joints
     const auto n_joints = state_limits.min_joint_pos.size();
     // number of real vector states
@@ -263,11 +261,23 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     ss_ = std::make_shared<og::SimpleSetup>(space_);
     si_ = ss_->getSpaceInformation();
 
-    start_state_ = std::make_shared<ob::ScopedState<>>(space_);
-    goal_state_ = std::make_shared<ob::ScopedState<>>(space_);
+    ompl_start_state_ = std::make_shared<ob::ScopedState<>>(space_);
+    ompl_goal_state_ = std::make_shared<ob::ScopedState<>>(space_);
+
+    // create collision checker object
+    // and passes costmap pointer to it
+    if (use_static_collision_checking_) {
+      ROS_INFO("Static collision checking is used.");
+      collision_checker_.reset(new GridCollisionChecker(
+          planner_costmap_ros_->getCostmap(), *footprint_));
+    } else {
+      ROS_INFO("Dynamic collision checking is used.");
+      collision_checker_.reset(new GridCollisionChecker(
+          planner_costmap_ros_->getCostmap(), footprint_client_, space_));
+    }
 
     ss_->setStateValidityChecker([this](const ob::State* state) {
-      return collision_checker_->isCollision(state);
+      return !collision_checker_->isCollision(state);
     });
 
     // planning objective
@@ -300,7 +310,6 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
 
       // check are we planning in time or iterations
       bool use_planning_time = false;
-      int planning_time = 0;
       int max_iterations;
       if (private_nh_.hasParam("use_planning_time")) {
         private_nh_.param<bool>("use_planning_time", use_planning_time,
@@ -308,151 +317,56 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         // if use planning, make sure planning time is given
         if (use_planning_time) {
           if (private_nh_.hasParam("planning_time")) {
-            private_nh_.param<int>("planning_time", planning_time,
-                                   planning_time);
+            private_nh_.param<double>("planning_time", planning_time_, 0.0);
+            planning_mode_ = PLANNING_MODE::DURATION;
           } else {
             ROS_ERROR(
                 "use_planning_time is true but planning_time parameter not "
                 "found.");
-            return;
+            exit(1);
           }
         } else {
           // otherwise use iterations instead
           if (private_nh_.hasParam("max_iterations")) {
-            private_nh_.param<int>("max_iterations", max_iterations,
-                                   max_iterations);
+            private_nh_.param<int>("max_iterations", max_iterations, 1000);
+            planning_mode_ = PLANNING_MODE::ITERATIONS;
           } else {
             ROS_ERROR(
                 "use_planning_time is false but max_iterations parameter not "
                 "found.");
-            return;
+            exit(1);
           }
         }
       } else {
         ROS_ERROR(
             "use_planning_time parameter not found. Make sure you set it to "
             "either true or false.");
-        return;
+        exit(1);
       }
-      planning_time_ = static_cast<unsigned>(planning_time);
+      planning_iterations_ = static_cast<unsigned>(max_iterations);
 
-      // RRT
-      if (planner_type_ == "rrt") {
-        ROS_INFO("Planner Type: rrt");
-        // we need to check planner specific parameters are given
-        if (private_nh_.hasParam("rrt/max_distance") &&
-            private_nh_.hasParam("rrt/interpolation_dist") &&
-            private_nh_.hasParam("rrt/goal_radius") &&
-            private_nh_.hasParam("rrt/goal_bias")) {
-          double max_distance, interpolation_dist, goal_radius, goal_bias;
-          private_nh_.param<double>("rrt/max_distance", max_distance,
-                                    max_distance);
-          private_nh_.param<double>("rrt/interpolation_dist",
-                                    interpolation_dist, interpolation_dist);
-          private_nh_.param<double>("rrt/goal_radius", goal_radius,
-                                    goal_radius);
-          private_nh_.param<double>("rrt/goal_bias", goal_bias, goal_bias);
-
-          // create rrt planner
-          planner_.reset(new RRT(state_limits, collision_checker_,
-                                 max_iterations, max_distance,
-                                 interpolation_dist, goal_radius, goal_bias,
-                                 use_seed, seed_number));
-        } else {
-          ROS_ERROR("RRT specific parameters not found.");
-          return;
+      // default to rrt_connect
+      planner_id_ = PLANNERS_IDS::RRT_CONNECT;
+      for (std::size_t i = 0; i < PLANNER_NAMES.size(); ++i) {
+        if (planner_type_ == PLANNER_NAMES[i]) {
+          planner_id_ = static_cast<int>(i);
+          ROS_INFO("Planner Type: %s", PLANNER_NAMES[i].c_str());
+          break;
         }
       }
-      // RRT*
-      else if (planner_type_ == "rrt_star") {
-        ROS_INFO("Planner Type: rrt_star");
-        // we need to check planner specific parameters are given
-        if (private_nh_.hasParam("rrt_star/update_goal_every") &&
-            private_nh_.hasParam("rrt_star/max_distance") &&
-            private_nh_.hasParam("rrt_star/rewire_factor") &&
-            private_nh_.hasParam("rrt_star/interpolation_dist") &&
-            private_nh_.hasParam("rrt_star/goal_radius") &&
-            private_nh_.hasParam("rrt_star/goal_bias")) {
-          int update_goal_every;
-          double max_distance, rewire_factor, interpolation_dist, goal_radius,
-              goal_bias;
-          private_nh_.param<int>("rrt_star/update_goal_every",
-                                 update_goal_every, update_goal_every);
-          private_nh_.param<double>("rrt_star/max_distance", max_distance,
-                                    max_distance);
-          private_nh_.param<double>("rrt_star/rewire_factor", rewire_factor,
-                                    rewire_factor);
-          private_nh_.param<double>("rrt_star/interpolation_dist",
-                                    interpolation_dist, interpolation_dist);
-          private_nh_.param<double>("rrt_star/goal_radius", goal_radius,
-                                    goal_radius);
-          private_nh_.param<double>("rrt_star/goal_bias", goal_bias, goal_bias);
 
-          int print_every = 0;
-          private_nh_.param<int>("rrt_star/print_every", print_every,
-                                 print_every);
-
-          // create rrt-star planner
-          planner_.reset(new RRTStar(state_limits, collision_checker_,
-                                     max_iterations, update_goal_every,
-                                     max_distance, rewire_factor,
-                                     interpolation_dist, goal_radius, goal_bias,
-                                     use_seed, seed_number, print_every));
-        } else {
-          ROS_ERROR("RRT specific parameters not found.");
+      // choose the planner
+      switch (planner_id_) {
+        case RRT_CONNECT:
+          ss_->setPlanner(
+              ob::PlannerPtr(std::make_shared<og::RRTConnect>(si_)));
+          break;
+        case RRT_STAR:
+          ss_->setPlanner(ob::PlannerPtr(std::make_shared<og::RRTstar>(si_)));
+          break;
+        default:
+          ROS_ERROR("Invalid planner type.");
           return;
-        }
-      } else if (planner_type_ == "informed_rrt_star") {
-        ROS_INFO("Planner Type: informed_rrt_star");
-
-        // we need to check planner specific parameters are given
-        if (private_nh_.hasParam("informed_rrt_star/max_sampling_tries") &&
-            private_nh_.hasParam("informed_rrt_star/max_distance") &&
-            private_nh_.hasParam("informed_rrt_star/rewire_factor") &&
-            private_nh_.hasParam("informed_rrt_star/interpolation_dist") &&
-            private_nh_.hasParam("informed_rrt_star/goal_radius") &&
-            private_nh_.hasParam("informed_rrt_star/goal_bias") &&
-            private_nh_.hasParam("informed_rrt_star/use_greedy_informed_set") &&
-            private_nh_.hasParam("informed_rrt_star/update_goal_every")) {
-          int max_sampling_tries, update_goal_every;
-          double max_distance, rewire_factor, interpolation_dist, goal_radius,
-              goal_bias;
-          bool use_greedy_informed_set = false;
-          private_nh_.param<int>("informed_rrt_star/max_sampling_tries",
-                                 max_sampling_tries, max_sampling_tries);
-          private_nh_.param<double>("informed_rrt_star/max_distance",
-                                    max_distance, max_distance);
-          private_nh_.param<double>("informed_rrt_star/rewire_factor",
-                                    rewire_factor, rewire_factor);
-          private_nh_.param<double>("informed_rrt_star/interpolation_dist",
-                                    interpolation_dist, interpolation_dist);
-          private_nh_.param<double>("informed_rrt_star/goal_radius",
-                                    goal_radius, goal_radius);
-          private_nh_.param<double>("informed_rrt_star/goal_bias", goal_bias,
-                                    goal_bias);
-          private_nh_.param<bool>("informed_rrt_star/use_greedy_informed_set",
-                                  use_greedy_informed_set,
-                                  use_greedy_informed_set);
-          private_nh_.param<int>("informed_rrt_star/update_goal_every",
-                                 update_goal_every, update_goal_every);
-
-          int print_every = 0;
-          private_nh_.param<int>("informed_rrt_star/print_every", print_every,
-                                 print_every);
-
-          // create rrt-star planner
-          planner_.reset(new InformedRRTStar(
-              state_limits, collision_checker_, max_iterations,
-              max_sampling_tries, max_distance, rewire_factor,
-              interpolation_dist, goal_radius, goal_bias, update_goal_every,
-              use_greedy_informed_set, use_seed, seed_number, print_every));
-        } else {
-          ROS_ERROR("Informed RRT* specific parameters not found.");
-          return;
-        }
-      } else {
-        ROS_ERROR("Invalid planner type.");
-        return;
       }
     } else {
       ROS_ERROR("No planner type found. Make sure planner_type is set.");
@@ -463,6 +377,8 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
     // (In real planning case, this needs to get it from tf [map->base_link])
     // if user does not provide inital pose parameter
     // we assume robot is at (0 m, 0 m, 0 rad) pose
+    start_state_ = std::make_shared<State>();
+    goal_state_ = std::make_shared<State>();
 
     if (private_nh_.hasParam("initial_pose")) {
       std::vector<double> initial_pose;
@@ -474,26 +390,26 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
             "%f, "
             "theta: %f.",
             initial_pose[0], initial_pose[1], initial_pose[2]);
-        start_vertex_.state.x = initial_pose[0];
-        start_vertex_.state.y = initial_pose[1];
-        start_vertex_.state.theta = initial_pose[2];
+        start_state_->x = initial_pose[0];
+        start_state_->y = initial_pose[1];
+        start_state_->theta = initial_pose[2];
       } else {
         // otherwise, we just use default initial pose
         ROS_WARN(
             "Initial pose does not have size of 3. Using default configuration "
             "x: 0.0, y: 0.0, "
             "theta: 0.0.");
-        start_vertex_.state.x = 0.0;
-        start_vertex_.state.y = 0.0;
-        start_vertex_.state.theta = 0.0;
+        start_state_->x = 0.0;
+        start_state_->y = 0.0;
+        start_state_->theta = 0.0;
       }
     } else {
       ROS_INFO(
           "Robot initial pose starts at default configuration x: 0.0, y: 0.0, "
           "theta: 0.0.");
-      start_vertex_.state.x = 0.0;
-      start_vertex_.state.y = 0.0;
-      start_vertex_.state.theta = 0.0;
+      start_state_->x = 0.0;
+      start_state_->y = 0.0;
+      start_state_->theta = 0.0;
     }
 
     if (!use_static_collision_checking_) {
@@ -521,12 +437,12 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
         }
 
         // now ok, add those in initial vertex
-        start_vertex_.state.joint_pos.resize(initial_joint_pos.size());
+        start_state_->joint_pos.resize(initial_joint_pos.size());
         for (std::size_t i = 0; i < initial_joint_pos.size(); ++i) {
-          start_vertex_.state.joint_pos[i] = initial_joint_pos[i];
+          start_state_->joint_pos[i] = initial_joint_pos[i];
         }
       } else {
-        ROS_ERROR("Initial joint pos not provided.");
+        ROS_ERROR("Initial joint pos is not provided.");
         return;
       }
     }
@@ -544,283 +460,341 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
                               &PsrrPlannerNodelet::goalCB, this);
 
     // publishers
-    planner_markers_pub_ = mt_nh_.advertise<visualization_msgs::MarkerArray>(
-        "/psrr_planner/markers", 10);
-    path_pub_ = mt_nh_.advertise<psrr_msgs::Path>("/psrr_planner/path", 1);
-    path_2d_pub_ = mt_nh_.advertise<nav_msgs::Path>("/psrr_planner/path_2d", 1);
-    footprint_arr_pub_ = mt_nh_.advertise<jsk_recognition_msgs::PolygonArray>(
-        "/psrr_planner/path_footprints", 1);
+    // path_pub_ = mt_nh_.advertise<psrr_msgs::Path>("/psrr_planner/path", 1);
+    // path_2d_pub_ = mt_nh_.advertise<nav_msgs::Path>("/psrr_planner/path_2d",
+    // 1);
 
     // timers
     planner_timer_ =
         mt_nh_.createWallTimer(ros::WallDuration(planner_update_interval_),
                                &PsrrPlannerNodelet::plannerTimerCB, this);
-    path_pub_timer_ =
-        mt_nh_.createWallTimer(ros::WallDuration(path_update_interval_),
-                               &PsrrPlannerNodelet::pathPublisherTimerCB, this);
+    // path_pub_timer_ =
+    //     mt_nh_.createWallTimer(ros::WallDuration(path_update_interval_),
+    //                            &PsrrPlannerNodelet::pathPublisherTimerCB,
+    //                            this);
   }
 
  private:
   void goalCB(const geometry_msgs::PoseStamped& msg) {
-    // get the desired goal pose
+    const auto goal_theta = tf2::getYaw(msg.pose.orientation);
+    // check goal pose is in collision or not
+    if (collision_checker_->isCollision(msg.pose.position.x,
+                                        msg.pose.position.y, goal_theta,
+                                        start_state_->joint_pos)) {
+      ROS_INFO("Goal pose at x: %f, y: %f, theta: %f is in collision.",
+               msg.pose.position.x, msg.pose.position.y, goal_theta);
+      return;
+    }
 
-    goal_vertex_.state.x = static_cast<float>(msg.pose.position.x);
-    goal_vertex_.state.y = static_cast<float>(msg.pose.position.y);
-    goal_vertex_.state.theta =
-        static_cast<float>(tf2::getYaw(msg.pose.orientation));
+    // update the goal pose
+    goal_state_->x = msg.pose.position.x;
+    goal_state_->y = msg.pose.position.y;
+    goal_state_->theta = goal_theta;
 
     // here we use the same joint pos as the initial pose
     // TODO: Make this goal joint pos sendable from rviz
-    goal_vertex_.state.joint_pos.clear();
-    goal_vertex_.state.joint_pos.resize(start_vertex_.state.joint_pos.size());
-    for (std::size_t i = 0; i < goal_vertex_.state.joint_pos.size(); ++i) {
-      goal_vertex_.state.joint_pos[i] = start_vertex_.state.joint_pos[i];
+    goal_state_->joint_pos.clear();
+    goal_state_->joint_pos.resize(start_state_->joint_pos.size());
+    for (std::size_t i = 0; i < goal_state_->joint_pos.size(); ++i) {
+      goal_state_->joint_pos[i] = start_state_->joint_pos[i];
     }
 
-    ROS_INFO("Goal pose received at x: %f, y: %f, theta: %f.",
-             goal_vertex_.state.x, goal_vertex_.state.y,
-             goal_vertex_.state.theta);
+    ROS_INFO("Goal pose received at x: %f, y: %f, theta: %f.", goal_state_->x,
+             goal_state_->y, goal_theta);
 
     has_goal_pose_ = true;
     planning_finished_ = false;
     planner_initialized_ = false;
   }
 
-  void plannerTimerCB(const ros::WallTimerEvent& event) {
-    // update rrt tree
+  void initPlanning() {
+    // get planner specific parameters from the parameter server
+    std::vector<std::string> param_names;
+    ss_->getPlanner()->params().getParamNames(param_names);
+    std::map<std::string, std::string> updated_param_names_values;
+    for (const auto& n : param_names) {
+      std::string param_name =
+          "ompl_planner_parameters/" + PLANNER_NAMES[planner_id_] + "/" + n;
+      XmlRpc::XmlRpcValue param;
+      if (private_nh_.hasParam(param_name)) {
+        private_nh_.getParam(param_name, param);
 
+        if (param.getType() == XmlRpc::XmlRpcValue::TypeDouble) {
+          updated_param_names_values[n] =
+              std::to_string(static_cast<double>(param));
+        } else if (param.getType() == XmlRpc::XmlRpcValue::TypeInt) {
+          updated_param_names_values[n] =
+              std::to_string(static_cast<int>(param));
+        } else if (param.getType() == XmlRpc::XmlRpcValue::TypeBoolean) {
+          updated_param_names_values[n] =
+              std::to_string(static_cast<bool>(param));
+        }
+      }
+    }
+    ss_->getPlanner()->params().setParams(updated_param_names_values);
+    ROS_INFO("Planner parameters updated.");
+
+    // convert from psrr_planner::State to ompl::base::ScopedStatePtr
+    updateOMPLState(ompl_start_state_, start_state_);
+    updateOMPLState(ompl_goal_state_, goal_state_);
+
+    ss_->clear();
+    ss_->clearStartStates();
+
+    // set the start and goal states
+    ss_->setStartAndGoalStates(*ompl_start_state_, *ompl_goal_state_);
+    ss_->setup();
+    ROS_INFO("Planning initialization setup finished.");
+  }
+
+  void plannerTimerCB(const ros::WallTimerEvent& event) {
     if (has_goal_pose_) {
       if (!planner_initialized_) {
-        planner_->init(start_vertex_, goal_vertex_, planning_time_);
+        initPlanning();
         planner_initialized_ = true;
       }
 
-      if (planner_->isPlanningFinished()) {
-        if (!planning_finished_) {
-          double solution_cost = planner_->getSolutionCost();
-          ROS_INFO("Solution cost: %f", solution_cost);
-          planning_finished_ = true;
-        }
-      } else {
-        // auto init_time = std::chrono::system_clock::now();
-        planner_->update();
-        // auto execution_time =
-        //     std::chrono::duration_cast<std::chrono::microseconds>(
-        //         std::chrono::system_clock::now() - init_time)
-        //         .count();
-        // std::cout << "RRT update step takes " << execution_time << " us"
-        //           << std::endl;
+      if (!planning_finished_) {
+        // we need to have two options for the planning
+        // 1. DEFAULT mode (planning with time or iterations)
+        // 2. ANIMATION mode (animate the planning with only iterations, we will
+        // only put this mode in experimental branch. This mode can animate the
+        // planning progress; useful for debugging and publications)
+
+        // Create the termination condition
+        std::shared_ptr<ob::PlannerTerminationCondition> ptc;
+        if (planning_mode_ == PLANNING_MODE::DURATION)
+          ptc = std::make_shared<ob::PlannerTerminationCondition>(
+              ob::timedPlannerTerminationCondition(planning_time_, 0.01));
+        else
+          ptc = std::make_shared<ob::PlannerTerminationCondition>(
+              ob::PlannerTerminationCondition(
+                  ob::IterationTerminationCondition(planning_iterations_)));
+
+        ROS_INFO("planning_mode: %d", planning_mode_);
+        ROS_INFO("planning_time: %.2f", planning_time_);
+
+        // solve the planning problem
+        ob::PlannerStatus solved;
+        solved = ss_->solve(*ptc);
+
+        // render visualization stuffs
+        // only one time
+
+        planning_finished_ = true;
       }
     }
 
     // publish markers
-    if (planner_markers_pub_.getNumSubscribers()) {
-      visualization_msgs::MarkerArray markers;
+    // if (planner_markers_pub_.getNumSubscribers()) {
+    //   visualization_msgs::MarkerArray markers;
 
-      // edge markers
-      visualization_msgs::Marker edges_marker;
-      edges_marker.header.frame_id = "map";
-      edges_marker.header.stamp = ros::Time::now();
-      edges_marker.ns = "edges";
-      edges_marker.id = 0;
-      edges_marker.action = visualization_msgs::Marker::ADD;
-      edges_marker.type = visualization_msgs::Marker::LINE_LIST;
-      edges_marker.pose.orientation.w = 1.0;
-      edges_marker.scale.x = 0.01;
+    //   // edge markers
+    //   visualization_msgs::Marker edges_marker;
+    //   edges_marker.header.frame_id = "map";
+    //   edges_marker.header.stamp = ros::Time::now();
+    //   edges_marker.ns = "edges";
+    //   edges_marker.id = 0;
+    //   edges_marker.action = visualization_msgs::Marker::ADD;
+    //   edges_marker.type = visualization_msgs::Marker::LINE_LIST;
+    //   edges_marker.pose.orientation.w = 1.0;
+    //   edges_marker.scale.x = 0.01;
 
-      std_msgs::ColorRGBA color;
-      color.r = 1.0;
-      color.g = 0.0;
-      color.b = 0.0;
-      color.a = 1.0;
+    //   std_msgs::ColorRGBA color;
+    //   color.r = 1.0;
+    //   color.g = 0.0;
+    //   color.b = 0.0;
+    //   color.a = 1.0;
 
-      for (const auto edge : *(planner_->getEdges())) {
-        geometry_msgs::Point p1;
-        p1.x = static_cast<double>(edge.first->state.x);
-        p1.y = static_cast<double>(edge.first->state.y);
-        p1.z = 0.0;
-        edges_marker.points.push_back(p1);
-        edges_marker.colors.push_back(color);
-        geometry_msgs::Point p2;
-        p2.x = static_cast<double>(edge.second->state.x);
-        p2.y = static_cast<double>(edge.second->state.y);
-        p2.z = 0.0;
-        edges_marker.points.push_back(p2);
-        edges_marker.colors.push_back(color);
-      }
+    //   for (const auto edge : *(planner_->getEdges())) {
+    //     geometry_msgs::Point p1;
+    //     p1.x = static_cast<double>(edge.first->state.x);
+    //     p1.y = static_cast<double>(edge.first->state.y);
+    //     p1.z = 0.0;
+    //     edges_marker.points.push_back(p1);
+    //     edges_marker.colors.push_back(color);
+    //     geometry_msgs::Point p2;
+    //     p2.x = static_cast<double>(edge.second->state.x);
+    //     p2.y = static_cast<double>(edge.second->state.y);
+    //     p2.z = 0.0;
+    //     edges_marker.points.push_back(p2);
+    //     edges_marker.colors.push_back(color);
+    //   }
 
-      markers.markers.emplace_back(std::move(edges_marker));
+    //   markers.markers.emplace_back(std::move(edges_marker));
 
-      // if we are using informed rrt*
-      // we have an option to visualize the informed set and greedy informed set
-      // only for 2D planar surface (future work will focus for general 3D
-      // robots)
-      if (planner_type_ == "informed_rrt_star" && planner_->hasSolution()) {
-        visualization_msgs::Marker informed_set_marker;
-        informed_set_marker.header.frame_id = "map";
-        informed_set_marker.header.stamp = ros::Time::now();
-        informed_set_marker.ns = "informed_set";
-        informed_set_marker.id = 1;
-        informed_set_marker.action = visualization_msgs::Marker::ADD;
-        informed_set_marker.type = visualization_msgs::Marker::CYLINDER;
-        informed_set_marker.scale.z = 0.01;
+    //   // if we are using informed rrt*
+    //   // we have an option to visualize the informed set and greedy informed
+    //   set
+    //   // only for 2D planar surface (future work will focus for general 3D
+    //   // robots)
+    //   if (planner_type_ == "informed_rrt_star" && planner_->hasSolution()) {
+    //     visualization_msgs::Marker informed_set_marker;
+    //     informed_set_marker.header.frame_id = "map";
+    //     informed_set_marker.header.stamp = ros::Time::now();
+    //     informed_set_marker.ns = "informed_set";
+    //     informed_set_marker.id = 1;
+    //     informed_set_marker.action = visualization_msgs::Marker::ADD;
+    //     informed_set_marker.type = visualization_msgs::Marker::CYLINDER;
+    //     informed_set_marker.scale.z = 0.01;
 
-        visualization_msgs::Marker greedy_informed_set_marker;
-        greedy_informed_set_marker.header.frame_id = "map";
-        greedy_informed_set_marker.header.stamp = ros::Time::now();
-        greedy_informed_set_marker.ns = "greedy_informed_set";
-        greedy_informed_set_marker.id = 2;
-        greedy_informed_set_marker.action = visualization_msgs::Marker::ADD;
-        greedy_informed_set_marker.type = visualization_msgs::Marker::CYLINDER;
-        greedy_informed_set_marker.scale.z = 0.01;
+    //     visualization_msgs::Marker greedy_informed_set_marker;
+    //     greedy_informed_set_marker.header.frame_id = "map";
+    //     greedy_informed_set_marker.header.stamp = ros::Time::now();
+    //     greedy_informed_set_marker.ns = "greedy_informed_set";
+    //     greedy_informed_set_marker.id = 2;
+    //     greedy_informed_set_marker.action = visualization_msgs::Marker::ADD;
+    //     greedy_informed_set_marker.type =
+    //     visualization_msgs::Marker::CYLINDER;
+    //     greedy_informed_set_marker.scale.z = 0.01;
 
-        // find transverse and conjugate diameters for scale.x and scale.y
-        auto transverse_diameter =
-            std::static_pointer_cast<InformedRRTStar>(planner_)
-                ->getTransverseDiameter();
-        auto conjugate_diameter =
-            std::static_pointer_cast<InformedRRTStar>(planner_)
-                ->getConjugateDiameter();
+    //     // find transverse and conjugate diameters for scale.x and scale.y
+    //     auto transverse_diameter =
+    //         std::static_pointer_cast<InformedRRTStar>(planner_)
+    //             ->getTransverseDiameter();
+    //     auto conjugate_diameter =
+    //         std::static_pointer_cast<InformedRRTStar>(planner_)
+    //             ->getConjugateDiameter();
 
-        informed_set_marker.scale.x = transverse_diameter[0];
-        informed_set_marker.scale.y = conjugate_diameter[0];
-        greedy_informed_set_marker.scale.x = transverse_diameter[1];
-        greedy_informed_set_marker.scale.y = conjugate_diameter[1];
+    //     informed_set_marker.scale.x = transverse_diameter[0];
+    //     informed_set_marker.scale.y = conjugate_diameter[0];
+    //     greedy_informed_set_marker.scale.x = transverse_diameter[1];
+    //     greedy_informed_set_marker.scale.y = conjugate_diameter[1];
 
-        // find ellipse center
-        auto center = std::static_pointer_cast<InformedRRTStar>(planner_)
-                          ->getEllipseCenter();
-        informed_set_marker.pose.position.x = center[0];
-        informed_set_marker.pose.position.y = center[1];
-        greedy_informed_set_marker.pose.position.x = center[0];
-        greedy_informed_set_marker.pose.position.y = center[1];
+    //     // find ellipse center
+    //     auto center = std::static_pointer_cast<InformedRRTStar>(planner_)
+    //                       ->getEllipseCenter();
+    //     informed_set_marker.pose.position.x = center[0];
+    //     informed_set_marker.pose.position.y = center[1];
+    //     greedy_informed_set_marker.pose.position.x = center[0];
+    //     greedy_informed_set_marker.pose.position.y = center[1];
 
-        // find ellipse orientation
-        const geometry_msgs::Quaternion orientation(
-            tf::createQuaternionMsgFromYaw(
-                std::static_pointer_cast<InformedRRTStar>(planner_)
-                    ->getEllipseOrientation()));
-        informed_set_marker.pose.orientation = orientation;
-        greedy_informed_set_marker.pose.orientation = orientation;
+    //     // find ellipse orientation
+    //     const geometry_msgs::Quaternion orientation(
+    //         tf::createQuaternionMsgFromYaw(
+    //             std::static_pointer_cast<InformedRRTStar>(planner_)
+    //                 ->getEllipseOrientation()));
+    //     informed_set_marker.pose.orientation = orientation;
+    //     greedy_informed_set_marker.pose.orientation = orientation;
 
-        // update colors
-        std_msgs::ColorRGBA color;
-        color.r = 1.0;
-        color.g = 0.0;
-        color.b = 0.0;
-        color.a = 0.3;
-        informed_set_marker.color = color;
+    //     // update colors
+    //     std_msgs::ColorRGBA color;
+    //     color.r = 1.0;
+    //     color.g = 0.0;
+    //     color.b = 0.0;
+    //     color.a = 0.3;
+    //     informed_set_marker.color = color;
 
-        color.r = 0.0;
-        color.g = 0.0;
-        color.b = 1.0;
-        color.a = 0.3;
-        greedy_informed_set_marker.color = color;
+    //     color.r = 0.0;
+    //     color.g = 0.0;
+    //     color.b = 1.0;
+    //     color.a = 0.3;
+    //     greedy_informed_set_marker.color = color;
 
-        markers.markers.emplace_back(std::move(informed_set_marker));
-        markers.markers.emplace_back(std::move(greedy_informed_set_marker));
-      }
+    //     markers.markers.emplace_back(std::move(informed_set_marker));
+    //     markers.markers.emplace_back(std::move(greedy_informed_set_marker));
+    //   }
 
-      planner_markers_pub_.publish(markers);
-    }
+    //   planner_markers_pub_.publish(markers);
+    // }
   }
 
-  void pathPublisherTimerCB(const ros::WallTimerEvent& event) {
-    // check if rrt has solution or not
-    if (planner_->hasSolution()) {
-      psrr_msgs::Path path;
-      path.header.frame_id = "map";
-      path.header.stamp = ros::Time::now();
+  // void pathPublisherTimerCB(const ros::WallTimerEvent& event) {
+  //   // check if rrt has solution or not
+  //   if (planner_->hasSolution()) {
+  //     psrr_msgs::Path path;
+  //     path.header.frame_id = "map";
+  //     path.header.stamp = ros::Time::now();
 
-      nav_msgs::Path path_2d;
-      path_2d.header.frame_id = "map";
-      path_2d.header.stamp = ros::Time::now();
+  //     nav_msgs::Path path_2d;
+  //     path_2d.header.frame_id = "map";
+  //     path_2d.header.stamp = ros::Time::now();
 
-      jsk_recognition_msgs::PolygonArray footprint_arr;
-      footprint_arr.header.frame_id = "map";
-      footprint_arr.header.stamp = ros::Time::now();
+  //     jsk_recognition_msgs::PolygonArray footprint_arr;
+  //     footprint_arr.header.frame_id = "map";
+  //     footprint_arr.header.stamp = ros::Time::now();
 
-      std::shared_ptr<Vertex> start_vertex = planner_->getStartVertex();
-      std::shared_ptr<Vertex> current = planner_->getGoalVertex();
-      while (current->parent || current == start_vertex) {
-        geometry_msgs::Pose path_pose;
-        geometry_msgs::PoseStamped path_pose_stamped;
-        sensor_msgs::JointState joint_state;
+  //     std::shared_ptr<Vertex> start_vertex = planner_->getStartVertex();
+  //     std::shared_ptr<Vertex> current = planner_->getGoalVertex();
+  //     while (current->parent || current == start_vertex) {
+  //       geometry_msgs::Pose path_pose;
+  //       geometry_msgs::PoseStamped path_pose_stamped;
+  //       sensor_msgs::JointState joint_state;
 
-        const geometry_msgs::Quaternion orientation(
-            tf::createQuaternionMsgFromYaw(current->state.theta));
+  //       const geometry_msgs::Quaternion orientation(
+  //           tf::createQuaternionMsgFromYaw(current->state.theta));
 
-        path_pose.position.x = current->state.x;
-        path_pose.position.y = current->state.y;
-        path_pose.orientation = orientation;
+  //       path_pose.position.x = current->state.x;
+  //       path_pose.position.y = current->state.y;
+  //       path_pose.orientation = orientation;
 
-        path_pose_stamped.pose.position.x = current->state.x;
-        path_pose_stamped.pose.position.y = current->state.y;
-        path_pose_stamped.pose.orientation = orientation;
+  //       path_pose_stamped.pose.position.x = current->state.x;
+  //       path_pose_stamped.pose.position.y = current->state.y;
+  //       path_pose_stamped.pose.orientation = orientation;
 
-        joint_state.position.resize(current->state.joint_pos.size());
-        for (std::size_t i = 0; i < joint_state.position.size(); ++i) {
-          joint_state.position[i] =
-              static_cast<double>(current->state.joint_pos[i]);
-        }
+  //       joint_state.position.resize(current->state.joint_pos.size());
+  //       for (std::size_t i = 0; i < joint_state.position.size(); ++i) {
+  //         joint_state.position[i] =
+  //             static_cast<double>(current->state.joint_pos[i]);
+  //       }
 
-        if (publish_path_footprints_) {
-          geometry_msgs::PolygonStamped polygon_stamped;
-          polygon_stamped.header.frame_id = "map";
-          polygon_stamped.header.stamp = ros::Time::now();
+  //       if (publish_path_footprints_) {
+  //         geometry_msgs::PolygonStamped polygon_stamped;
+  //         polygon_stamped.header.frame_id = "map";
+  //         polygon_stamped.header.stamp = ros::Time::now();
 
-          std::vector<geometry_msgs::Point> footprint;
+  //         std::vector<geometry_msgs::Point> footprint;
 
-          if (use_static_collision_checking_) {
-            footprint = planner_costmap_ros_->getUnpaddedRobotFootprint();
-          } else {
-            // here we use our shared ros service to get the footprint
-            psrr_msgs::FootPrintSrv footprint_req_msg;
-            for (const auto pos : current->state.joint_pos) {
-              footprint_req_msg.request.position.push_back(
-                  static_cast<double>(pos));
-            }
-            if (footprint_client_->call(footprint_req_msg)) {
-              footprint = footprint_req_msg.response.points;
-            } else {
-              ROS_ERROR("Failed to call footprint service.");
-              return;
-            }
-          }
+  //         if (use_static_collision_checking_) {
+  //           footprint = planner_costmap_ros_->getUnpaddedRobotFootprint();
+  //         } else {
+  //           // here we use our shared ros service to get the footprint
+  //           psrr_msgs::FootPrintSrv footprint_req_msg;
+  //           for (const auto pos : current->state.joint_pos) {
+  //             footprint_req_msg.request.position.push_back(
+  //                 static_cast<double>(pos));
+  //           }
+  //           if (footprint_client_->call(footprint_req_msg)) {
+  //             footprint = footprint_req_msg.response.points;
+  //           } else {
+  //             ROS_ERROR("Failed to call footprint service.");
+  //             return;
+  //           }
+  //         }
 
-          std::vector<geometry_msgs::Point> transformed_footprint;
-          costmap_2d::transformFootprint(current->state.x, current->state.y,
-                                         current->state.theta, footprint,
-                                         transformed_footprint);
+  //         std::vector<geometry_msgs::Point> transformed_footprint;
+  //         costmap_2d::transformFootprint(current->state.x, current->state.y,
+  //                                        current->state.theta, footprint,
+  //                                        transformed_footprint);
 
-          for (auto& p : transformed_footprint) {
-            geometry_msgs::Point32 p32;
-            p32.x = p.x;
-            p32.y = p.y;
-            p32.z = p.z;
-            polygon_stamped.polygon.points.push_back(p32);
-          }
-          footprint_arr.polygons.push_back(polygon_stamped);
-        }
+  //         for (auto& p : transformed_footprint) {
+  //           geometry_msgs::Point32 p32;
+  //           p32.x = p.x;
+  //           p32.y = p.y;
+  //           p32.z = p.z;
+  //           polygon_stamped.polygon.points.push_back(p32);
+  //         }
+  //         footprint_arr.polygons.push_back(polygon_stamped);
+  //       }
 
-        path.poses.push_back(path_pose);
-        path.joint_state.push_back(joint_state);
-        path_2d.poses.push_back(path_pose_stamped);
+  //       path.poses.push_back(path_pose);
+  //       path.joint_state.push_back(joint_state);
+  //       path_2d.poses.push_back(path_pose_stamped);
 
-        if (current == start_vertex) {
-          break;
-        }
-        current = current->parent;
-      }
+  //       if (current == start_vertex) {
+  //         break;
+  //       }
+  //       current = current->parent;
+  //     }
 
-      path_pub_.publish(path);
-      path_2d_pub_.publish(path_2d);
+  //     path_pub_.publish(path);
+  //     path_2d_pub_.publish(path_2d);
 
-      if (publish_path_footprints_) {
-        footprint_arr_pub_.publish(footprint_arr);
-      }
-    }
-  }
+  //     if (publish_path_footprints_) {
+  //       footprint_arr_pub_.publish(footprint_arr);
+  //     }
+  //   }
+  // }
 
   // ROS related
   // node handles
@@ -832,14 +806,14 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   ros::Subscriber goal_sub_;
 
   // publishers
-  ros::Publisher path_pub_;
-  ros::Publisher path_2d_pub_;
-  ros::Publisher planner_markers_pub_;
-  ros::Publisher footprint_arr_pub_;
+  // ros::Publisher path_pub_;
+  // ros::Publisher path_2d_pub_;
+  // ros::Publisher planner_markers_pub_;
+  // ros::Publisher footprint_arr_pub_;
 
   // timers
   ros::WallTimer planner_timer_;
-  ros::WallTimer path_pub_timer_;
+  // ros::WallTimer path_pub_timer_;
 
   // service clients
   std::shared_ptr<ros::ServiceClient> footprint_client_;
@@ -848,16 +822,21 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   std::shared_ptr<tf2_ros::Buffer> tf_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
+  std::shared_ptr<visualizer::Visualizer> visualizer_;
+
   std::unique_ptr<costmap_2d::Costmap2DROS> planner_costmap_ros_;
   std::shared_ptr<GridCollisionChecker> collision_checker_;
 
   std::string planner_type_;
-  std::shared_ptr<BasePlanner> planner_;
-  Vertex start_vertex_;
-  Vertex goal_vertex_;
+  std::shared_ptr<State> start_state_;
+  std::shared_ptr<State> goal_state_;
 
-  std::chrono::system_clock::time_point planner_init_time_;
-  unsigned int planning_time_;
+  // std::chrono::system_clock::time_point planner_init_time_;
+
+  int planning_mode_;
+  int planner_id_;
+  double planning_time_;
+  unsigned int planning_iterations_;
 
   double planner_update_interval_;
   double path_update_interval_;
@@ -874,8 +853,8 @@ class PsrrPlannerNodelet : public nodelet::Nodelet {
   ob::StateSpacePtr space_;
   og::SimpleSetupPtr ss_;
   ob::SpaceInformationPtr si_;
-  ob::ScopedStatePtr start_state_;
-  ob::ScopedStatePtr goal_state_;
+  ob::ScopedStatePtr ompl_start_state_;
+  ob::ScopedStatePtr ompl_goal_state_;
 };
 }  // namespace psrr_planner
 

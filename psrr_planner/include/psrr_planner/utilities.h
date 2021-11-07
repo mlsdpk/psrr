@@ -33,14 +33,24 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <memory>
 #include <vector>
 
+// ompl related
+#include <ompl/base/SpaceInformation.h>
+#include <ompl/base/spaces/RealVectorStateSpace.h>
+#include <ompl/base/spaces/SO2StateSpace.h>
+#include <ompl/config.h>
+#include <ompl/geometric/SimpleSetup.h>
+
+namespace ob = ompl::base;
+
 namespace psrr_planner {
+namespace utils {
 
 // n-dimensional state of the self-reconfigurable robot
 struct State {
-  float x;
-  float y;
-  float theta;
-  std::vector<float> joint_pos;
+  double x;
+  double y;
+  double theta;
+  std::vector<double> joint_pos;
 };
 
 struct StateLimits {
@@ -60,11 +70,36 @@ struct Vertex {
 };
 
 /**
+ * @brief Convenient function for converting from psrr_planner::State into
+ * ompl::base::ScopedStatePtr
+ */
+inline void updateOMPLState(ob::ScopedStatePtr ompl_state,
+                            std::shared_ptr<const State> state) {
+  // number of dimensions in R^n excluding x and y
+  const auto rn_size = state->joint_pos.size();
+
+  // x and y in R^n
+  (*ompl_state)[0] = state->x;
+  (*ompl_state)[1] = state->y;
+
+  // left-over portion of R^n
+  for (std::size_t i = 0; i < rn_size; ++i) {
+    (*ompl_state)[i + 2] = state->joint_pos[i];
+  }
+
+  // SO(2) State Space
+  (*ompl_state)
+      ->as<ob::CompoundState>()
+      ->as<ob::SO2StateSpace::StateType>(1)
+      ->value = state->theta;
+}
+
+/**
  * @brief The Lebesgue measure (i.e., "volume") of an n-dimensional ball with a
  * unit radius.
  * Ref: https://ompl.kavrakilab.org/GeometricEquations_8cpp_source.html
  */
-static double unitNBallMeasure(unsigned int n) {
+inline double unitNBallMeasure(unsigned int n) {
   // This is the radius version with r removed (as it is 1) for efficiency
   return std::pow(std::sqrt(boost::math::constants::pi<double>()),
                   static_cast<double>(n)) /
@@ -79,7 +114,7 @@ static double unitNBallMeasure(unsigned int n) {
  * @param d_foci distance between two focii
  * @param d_transverse transverse diameter
  */
-static double prolateHyperspheroidMeasure(unsigned int n, double d_foci,
+inline double prolateHyperspheroidMeasure(unsigned int n, double d_foci,
                                           double d_transverse) {
   // Sanity check input
   if (d_transverse < d_foci) {
@@ -117,7 +152,7 @@ static double prolateHyperspheroidMeasure(unsigned int n, double d_foci,
  * @brief Calculate the measure (i.e., "n-dimensional volume") of a problem with
  * R^n and SO(2) state spaces
  */
-static double problemMeasure(const StateLimits& state_limits) {
+inline double problemMeasure(const StateLimits& state_limits) {
   double measure = 1.0;
 
   // real vector components first
@@ -135,4 +170,5 @@ static double problemMeasure(const StateLimits& state_limits) {
   return measure;
 }
 
+}  // namespace utils
 }  // namespace psrr_planner

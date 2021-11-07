@@ -37,6 +37,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ompl/base/spaces/RealVectorStateSpace.h>
 #include <ompl/base/spaces/SO2StateSpace.h>
 #include <ompl/config.h>
+#include <ompl/geometric/SimpleSetup.h>
 
 namespace ob = ompl::base;
 
@@ -57,19 +58,30 @@ class GridCollisionChecker {
    */
   GridCollisionChecker(costmap_2d::Costmap2D* costmap,
                        const std::vector<geometry_msgs::Point>& footprint)
-      : costmap_{costmap}, footprint_{footprint}, use_static_footprint_{true} {}
+      : costmap_{costmap},
+        footprint_{footprint},
+        rn_dim_{2u},
+        use_static_footprint_{true} {}
 
   /**
    * @brief A constructor for psrr_planner::GridCollisionChecker
    * for dynamic footprint collision checking
    * @param costmap The costmap to collision check against
    * @param footprint_client shared_ptr ROS service client for dynamic footprint
+   * @param space shared_ptr ompl state space
    */
   GridCollisionChecker(costmap_2d::Costmap2D* costmap,
-                       std::shared_ptr<ros::ServiceClient> footprint_client)
+                       std::shared_ptr<ros::ServiceClient> footprint_client,
+                       ob::StateSpacePtr space)
       : costmap_{costmap},
         footprint_client_{footprint_client},
-        use_static_footprint_{false} {}
+        use_static_footprint_{false} {
+    rn_dim_ = space->as<ob::CompoundStateSpace>()
+                  ->getSubspace(0)
+                  ->as<ob::RealVectorStateSpace>()
+                  ->getDimension();
+    ROS_INFO("Dynamic collision checker is using %d R^n states.", rn_dim_);
+  }
 
   /**
    * @brief Check whether ompl compound state is in collision or not
@@ -81,30 +93,21 @@ class GridCollisionChecker {
       throw std::runtime_error("No state found for vertex");
     }
 
-    // Convert to CompoundStateSpace
-    const ob::CompoundStateSpace::StateType& compound_state =
-        *state->as<ob::CompoundStateSpace::StateType>();
+    const auto* rn_state =
+        state->as<ob::CompoundState>()->as<ob::RealVectorStateSpace::StateType>(
+            0);
 
-    // number of dimensions in R^n
-    const auto rn_size =
-        compound_state.as<ob::RealVectorStateSpace>(0)->getDimension();
-
-    // R^n State Space
-    const ob::RealVectorStateSpace::StateType& rn_state =
-        *compound_state.as<ob::RealVectorStateSpace::StateType>(0);
-
-    // SO(2) State Space
-    const ob::SO2StateSpace::StateType& so2_state =
-        *compound_state.as<ob::SO2StateSpace::StateType>(1);
+    const auto* so2_state =
+        state->as<ob::CompoundState>()->as<ob::SO2StateSpace::StateType>(1);
 
     // extract joint positions from left-over portion of R^n state space
     std::vector<double> joint_pos;
-    for (std::size_t i = 0; i < rn_size - 2; ++i) {
-      joint_pos.push_back(rn_state.values[i + 2]);
+    for (std::size_t i = 0; i < static_cast<std::size_t>(rn_dim_ - 2); ++i) {
+      joint_pos.push_back(rn_state->values[i + 2]);
     }
 
-    return isCollision(rn_state.values[0], rn_state.values[1], so2_state.value,
-                       joint_pos);
+    return isCollision(rn_state->values[0], rn_state->values[1],
+                       so2_state->value, joint_pos);
   }
 
   /**
@@ -222,6 +225,7 @@ class GridCollisionChecker {
   costmap_2d::Costmap2D* costmap_;
   std::vector<geometry_msgs::Point> footprint_;
   std::shared_ptr<ros::ServiceClient> footprint_client_;
+  unsigned int rn_dim_;
   bool use_static_footprint_;
 };
 }  // namespace psrr_planner

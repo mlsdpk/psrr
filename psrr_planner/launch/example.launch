@@ -16,7 +16,8 @@
     </node>
 
     <node pkg="nodelet" type="nodelet" name="psrr_planner_nodelet" args="load psrr_planner/PsrrPlannerNodelet $(arg nodelet_manager)"> 
-        <rosparam file="$(find psrr_planner)/launch/planner_params.yaml" command="load"/>
+        <rosparam file="$(find psrr_planner)/launch/psrr_planner_params.yaml" command="load"/>
+        <rosparam file="$(find psrr_planner)/launch/ompl_params.yaml" command="load"/>
     </node>
 
     <!-- rivz -->
