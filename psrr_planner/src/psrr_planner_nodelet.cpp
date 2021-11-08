@@ -50,6 +50,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ompl/base/terminationconditions/IterationTerminationCondition.h>
 #include <ompl/config.h>
 #include <ompl/geometric/SimpleSetup.h>
+
+// note that GIRRT* is not included in OMPL yet, only in my local machine
+// I'll try to make PR to ompl and add our work GIRRT*
+#include <ompl/geometric/planners/rrt/GreedyInformedRRTstar.h>
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
 #include <ompl/geometric/planners/rrt/RRTstar.h>
 
