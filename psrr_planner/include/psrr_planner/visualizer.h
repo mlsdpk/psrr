@@ -4,6 +4,13 @@
 #include <ros/ros.h>
 #include <visualization_msgs/MarkerArray.h>
 
+// ompl related
+#include <ompl/base/SpaceInformation.h>
+#include <ompl/base/spaces/RealVectorStateSpace.h>
+#include <ompl/base/spaces/SO2StateSpace.h>
+#include <ompl/config.h>
+#include <ompl/geometric/SimpleSetup.h>
+
 namespace psrr_planner {
 namespace visualizer {
 
@@ -45,6 +52,9 @@ class Visualizer {
    * @brief Destructor
    */
   ~Visualizer();
+
+  void renderPathFootprints(
+      std::vector<geometry_msgs::PolygonStamped> &polygons);
 
  private:
   ros::Publisher markers_pub_;

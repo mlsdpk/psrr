@@ -9,7 +9,11 @@ endif()
 set(${PROJECT_NAME}_CATKIN_DEPS
   roscpp
   psrr_msgs
+  sensor_msgs
+  nav_msgs
+  visualization_msgs
   tf2
+  tf2_geometry_msgs
   tf2_ros
   costmap_2d
   geometry_msgs

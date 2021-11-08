@@ -25,7 +25,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #pragma once
 
+#include <geometry_msgs/Pose.h>
+#include <sensor_msgs/JointState.h>
 #include <std_msgs/ColorRGBA.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 #include <boost/math/constants/constants.hpp>
 #include <cmath>
@@ -92,6 +95,54 @@ inline void updateOMPLState(ob::ScopedStatePtr ompl_state,
       ->as<ob::CompoundState>()
       ->as<ob::SO2StateSpace::StateType>(1)
       ->value = state->theta;
+}
+
+inline void convertToQuaternion(const double& angle,
+                                geometry_msgs::Quaternion& quat) {
+  tf2::Quaternion q;
+  q.setRPY(0, 0, angle);
+  quat = tf2::toMsg(q);
+}
+
+/**
+ * @brief Convenient function for converting from ompl::base::State into
+ * geometry_msgs::Pose SE2 state
+ */
+inline geometry_msgs::Pose omplStateToSE2Pose(const ob::State* state) {
+  if (!state) {
+    throw std::runtime_error("No state found for vertex");
+  }
+  const auto* rn_state =
+      state->as<ob::CompoundState>()->as<ob::RealVectorStateSpace::StateType>(
+          0);
+  const auto* so2_state =
+      state->as<ob::CompoundState>()->as<ob::SO2StateSpace::StateType>(1);
+
+  geometry_msgs::Pose temp_pose;
+  temp_pose.position.x = rn_state->values[0];
+  temp_pose.position.y = rn_state->values[1];
+  convertToQuaternion(so2_state->value, temp_pose.orientation);
+  return temp_pose;
+}
+
+/**
+ * @brief Convenient function for converting from ompl::base::State into
+ * sensor_msgs::JointState R^n states excluding x and y positions
+ */
+inline sensor_msgs::JointState omplStateToJointState(const ob::State* state,
+                                                     unsigned int ndim_joint) {
+  if (!state) {
+    throw std::runtime_error("No state found for vertex");
+  }
+  const auto* rn_state =
+      state->as<ob::CompoundState>()->as<ob::RealVectorStateSpace::StateType>(
+          0);
+  sensor_msgs::JointState joint_state;
+  joint_state.position.resize(static_cast<std::size_t>(ndim_joint));
+  for (std::size_t i = 0; i < static_cast<std::size_t>(ndim_joint); ++i) {
+    joint_state.position[i] = rn_state->values[i + 2];
+  }
+  return joint_state;
 }
 
 /**

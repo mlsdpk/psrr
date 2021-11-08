@@ -2,7 +2,7 @@
 ompl_planner_parameters:
   rrt_connect:
     intermediate_states: false
-    range: 0.0
+    range: 0.5
 
   rrt_star:
     delay_collision_checking: true
@@ -15,7 +15,7 @@ ompl_planner_parameters:
     ordering_batch_size: 1
     prune_threshold: 0.05
     pruned_measure: false
-    range: 0.0
+    range: 0.5
     rewire_factor: 1.1
     sample_rejection: false
     tree_pruning: false

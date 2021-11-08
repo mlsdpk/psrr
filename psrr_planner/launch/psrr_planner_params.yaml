@@ -1,5 +1,6 @@
 planner_update_interval: 0.001 # 500Hz
-path_update_interval: 1.0 # 1Hz
+
+path_publish_frequency: 10.0 # 10Hz
 
 # whether publish footprints of solution path or not
 publish_path_footprints: true
@@ -39,7 +40,7 @@ planner_type: rrt_connect
 use_planning_time: true
 
 # planning time in seconds
-planning_time: 1.0
+planning_time: 5.0
 
 # maximum number of iterations to run the algorithm
 # if use_planning_time is true, max_iterations is not used 
