@@ -32,3 +32,22 @@ Then compile with catkin:
 ```
 catkin_make
 ```
+
+## Citation
+
+If you are interested in these self-reconfigurable systems, you may take a look at our T-RO paper.
+
+ - Kyaw, Phone Thiha, et al. [**Energy-efficient path planning of reconfigurable robots in complex environments**](https://ieeexplore.ieee.org/abstract/document/9716740). IEEE Transactions on Robotics (T-RO), 2022.
+ 
+ ```bibtex
+@article{kyaw2022energy,
+  title={Energy-efficient path planning of reconfigurable robots in complex environments},
+  author={Kyaw, Phone Thiha and Le, Anh Vu and Veerajagadheswar, Prabakaran and Elara, Mohan Rajesh and Thu, Theint Theint and Nhan, Nguyen Huu Khanh and Van Duc, Phan and Vu, Minh Bui},
+  journal={IEEE Transactions on Robotics},
+  volume={38},
+  number={4},
+  pages={2481--2494},
+  year={2022},
+  publisher={IEEE}
+}
+```
